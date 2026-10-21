@@ -1,0 +1,7 @@
+{
+  "appId": "it.dalbrocante.spoolio",
+  "appName": "Spoolio",
+  "webDir": "www",
+  "server": { "androidScheme": "https" },
+  "android": { "allowMixedContent": false }
+}

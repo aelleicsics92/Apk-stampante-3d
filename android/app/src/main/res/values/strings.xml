@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Spoolio</string>
+    <string name="title_activity_main">Spoolio</string>
+    <string name="package_name">it.dalbrocante.spoolio</string>
+    <string name="custom_url_scheme">it.dalbrocante.spoolio</string>
+</resources>
