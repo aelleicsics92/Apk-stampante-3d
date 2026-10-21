@@ -127,7 +127,21 @@ async function productPrice(f, url) {
     const one = pool.filter(v => spoolsOf(vtxt(v)) === 1); if (one.length) pool = one;
     pick = pool.reduce((a, v) => (per(v) < per(a) ? v : a), pool[0]);
   }
-  return { price: per(pick), origin: m[1], variant: vtxt(pick) };
+  return { price: per(pick), origin: m[1], variant: vtxt(pick), id: pick.id };
+}
+async function cartSheet() {
+  const fs = list('filaments').filter(f => (tot(f) <= 0 || f.riordina) && /^https?:\/\/[^/]+\/(?:[a-z-]+\/)?products\//i.test(f.url || ''));
+  if (!fs.length) { toast('Nessuna bobina da riordinare con link prodotto'); return; }
+  toast('Preparo il carrello…'); const it = [];
+  for (const f of fs) { try { const pv = await productPrice(f, f.url); if (pv) it.push({ f, o: pv.origin, id: pv.id, v: pv.variant }); } catch (e) { console.warn(e); } }
+  if (!it.length) { toast('Impossibile leggere gli store'); return; }
+  const body = it.map((x, i) => `<div class="row" style="justify-content:space-between;gap:8px;margin:6px 0"><span style="font-size:.88rem">${esc(fname(x.f))}<br><small style="color:#6b7280">${esc(new URL(x.o).host)} · ${esc(x.v)}</small></span><input class="cq" data-i="${i}" type="number" inputmode="numeric" min="0" value="1" style="width:56px"></div>`).join('');
+  openSheet('Carrello riordino', body, { label: 'Apri carrello', save: el => {
+    const g = {}; el.querySelectorAll('.cq').forEach(q => { const n = Math.floor(+q.value || 0), x = it[+q.dataset.i]; if (n > 0) (g[x.o] = g[x.o] || []).push(x.id + ':' + n); });
+    const urls = Object.entries(g).map(([o, l]) => o + '/cart/' + l.join(','));
+    if (!urls.length) { toast('Quantità 0'); return false; }
+    urls.forEach((u, i) => setTimeout(() => openUrl(u), i * 1500));
+  } });
 }
 let PRB = false;
 async function refreshPrices(force) {
@@ -319,7 +333,7 @@ function viewMag() {
   <input class="search" id="q" type="text" ${OF} placeholder="Cerca marca, tipo, colore o codice" value="${esc(V.q)}">
   <div class="chips">${[['all', 'Tutti'], ['stock', 'In scorta'], ['low', 'Bassi'], ['dry', '💧 Essiccazione']].map(([k, l]) => `<button class="chip ${V.flt === k ? 'on' : ''}" data-a="flt" data-k="${k}">${l}</button>`).join('')}
     <button class="chip" data-a="scan">📷 Scansiona</button><button class="chip" data-a="prices">↻ Prezzi Sunlu</button>
-    ${V.flt === 'out' && rows.length ? '<button class="chip" data-a="copyreorder">Copia lista</button>' : ''}</div>
+    ${V.flt === 'out' && rows.length ? '<button class="chip" data-a="copyreorder">Copia lista</button><button class="chip on" data-a="cart">🛒 Carrello</button>' : ''}</div>
   <div class="list">${rows.map(filCard).join('') || '<div class="empty">Nessuna bobina. Tocca + per aggiungerne una, oppure collega il cloud in Impostazioni.</div>'}</div>`;
 }
 function filCard(f) {
@@ -661,7 +675,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v1.9</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v2.0</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
@@ -848,6 +862,7 @@ document.addEventListener('click', e => {
     if (act === 'sharelink') { const c = cfg(); if (!cfgOK()) { toast('Prima inserisci URL e codice'); return; } share('spoolio:' + btoa(JSON.stringify({ u: c.url, c: c.code, k: c.key || '' })), 'Collegamento Spoolio'); return; }
     if (act === 'copysql') { share(SB_SQL, 'Script Supabase'); return; }
     if (act === 'copyrules') { share(RULES, 'Regole Firebase'); return; }
+    if (act === 'cart') { cartSheet(); return; }
     if (act === 'copyreorder') { share('Da riordinare:\n' + list('filaments').filter(f => tot(f) <= 0 || f.riordina).map(f => '- ' + fname(f)).join('\n'), 'Lista riordino'); return; }
     if (act === 'export') { exportData(); return; }
     if (act === 'import') { $('#impf').click(); return; }
