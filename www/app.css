@@ -150,3 +150,5 @@ a.badge{text-decoration:none;cursor:pointer}
 body.kb .sbody{padding-bottom:46vh}
 body.kb #app{padding-bottom:46vh}
 body.kbopen #tabs,body.kbopen #fab{display:none}
+
+.sbar{position:sticky;top:calc(var(--hh,64px) - 8px);z-index:15;background:var(--bg);padding:8px 0;display:flex;gap:8px;align-items:center}

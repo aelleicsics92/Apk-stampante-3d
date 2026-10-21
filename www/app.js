@@ -149,7 +149,7 @@ async function cartSheet() {
     try {
       const pv = await productPrice(f, f.url); if (!pv) continue;
       const rate = await eurRate(pv.origin), pr = rate ? Math.round(pv.price * rate * 100) / 100 : (f.costo || 0);
-      it.push({ f, o: pv.origin, id: pv.id, v: pv.variant, pr, q: 1, on: true, moq: pv.moq, why: reWhy(f) });
+      it.push({ f, h: (f.url.match(/products\/([^/?#]+)/) || [])[1] || '', o: pv.origin, id: pv.id, v: pv.variant, pr, q: 1, on: true, moq: pv.moq, why: reWhy(f) });
     } catch (e) { console.warn(e); }
   }
   if (!it.length) { toast('Impossibile leggere gli store'); return; }
@@ -177,8 +177,14 @@ async function cartSheet() {
       el.querySelectorAll('.crow').forEach(r => { const x = it[+r.dataset.i]; r.classList.toggle('off', !x.on); r.style.opacity = x.on ? 1 : .45; r.querySelector('.cn').textContent = x.q; r.querySelector('.ct').textContent = eur(x.pr * x.q); r.querySelector('.cc').checked = x.on; });
       const n = sel().reduce((a, x) => a + x.q, 0), t = sel().reduce((a, x) => a + x.q * x.pr, 0);
       $('#ctot', el).textContent = `Totale stimato: ${eur(t)} · ${n} bobine`;
-      const moq = S.settings.sogliaMin > 0 ? S.settings.sogliaMin : Math.max(0, ...it.map(x => x.moq || 0)), miss = moq - n;
-      const w = $('#cwarn', el); w.style.display = moq && miss > 0 ? 'block' : 'none'; w.textContent = `⚠️ Minimo ${moq} bobine per questo ordine: ne mancano ${miss}.`;
+      const grp = {}; it.forEach(x => { const g = grp[x.o + x.h] = grp[x.o + x.h] || { moq: 0, n: 0 }; g.moq = Math.max(g.moq, x.moq || 0); if (x.on) g.n += x.q; });
+      const mm = S.settings.sogliaMin || 0, tn = sel().reduce((a, x) => a + x.q, 0);
+      const bad = Object.values(grp).filter(g => g.moq && g.n > 0 && g.n < g.moq).map(g => g.moq - g.n);
+      const lack = Math.max(mm > tn ? mm - tn : 0, ...bad, 0), mx = Math.max(mm, ...Object.values(grp).map(g => g.moq), 0);
+      const w = $('#cwarn', el); w.style.display = mx ? 'block' : 'none';
+      w.style.background = lack ? '#fffbeb' : '#ecfdf5'; w.style.color = lack ? '#92400e' : '#065f46';
+      w.textContent = lack ? `⚠️ Minimo ${mx} bobine per prodotto/ordine: ne mancano ${lack}.` : `✓ Minimo ordine ${mx} bobine rispettato.`;
+      const miss = lack, moq = mx;
       const ok = el.querySelector('[data-s=ok]'); ok.textContent = `Apri carrello (${n})` + (moq && miss > 0 ? ` · mancano ${miss}` : '');
     };
     el.addEventListener('click', e => {
@@ -351,7 +357,7 @@ addEventListener('popstate', () => { if (skipPop) { skipPop = false; return; } r
 
 /* ---------- render ---------- */
 function render() {
-  clearAC();
+  clearAC(); document.documentElement.style.setProperty('--hh', $('#top').offsetHeight + 'px');
   $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === V.tab));
   $('#fab').style.display = (V.tab === 'mag' || V.tab === 'print') ? 'grid' : 'none';
   const v = $('#view');
@@ -381,7 +387,7 @@ function viewMag() {
     <button class="stat ${V.flt === 'new' ? 'on' : ''}" data-a="flt" data-t="1" data-k="new"><b>${all.reduce((a, f) => a + (f.nuove || 0), 0)}</b><span>Nuove</span></button>
     <button class="stat ${V.flt === 'used' ? 'on' : ''}" data-a="flt" data-t="1" data-k="used"><b>${all.reduce((a, f) => a + (f.usate || 0), 0)}</b><span>Usate</span></button>
     <button class="stat ${nOut ? 'warn' : ''} ${V.flt === 'out' ? 'on' : ''}" data-a="flt" data-t="1" data-k="out"><b>${nOut}</b><span>Riordina</span></button></div>
-  <div style="display:flex;gap:8px;align-items:center"><input class="search" id="q" type="text" ${OF} placeholder="Cerca marca, tipo, colore o codice" value="${esc(V.q)}" style="flex:1;min-width:0"><button data-a="cart" aria-label="Carrello riordino" style="position:relative;flex:none;width:46px;height:46px;border-radius:14px;border:1px solid #d1fae5;background:#ecfdf5;font-size:1.25rem">🛒${nOut ? `<span style="position:absolute;top:-6px;right:-6px;min-width:19px;height:19px;border-radius:10px;background:#059669;color:#fff;font-size:.7rem;font-weight:700;line-height:19px;text-align:center;padding:0 4px">${nOut}</span>` : ''}</button></div>
+  <div class="sbar"><input class="search" id="q" type="text" ${OF} placeholder="Cerca marca, tipo, colore o codice" value="${esc(V.q)}" style="flex:1;min-width:0"><button data-a="cart" aria-label="Carrello riordino" style="position:relative;flex:none;width:46px;height:46px;border-radius:14px;border:1px solid #d1fae5;background:#ecfdf5;font-size:1.25rem">🛒${nOut ? `<span style="position:absolute;top:-6px;right:-6px;min-width:19px;height:19px;border-radius:10px;background:#059669;color:#fff;font-size:.7rem;font-weight:700;line-height:19px;text-align:center;padding:0 4px">${nOut}</span>` : ''}</button></div>
   <div class="chips">${[['all', 'Tutti'], ['stock', 'In scorta'], ['low', 'Bassi'], ['dry', '💧 Essiccazione']].map(([k, l]) => `<button class="chip ${V.flt === k ? 'on' : ''}" data-a="flt" data-k="${k}">${l}</button>`).join('')}
     <button class="chip" data-a="scan">📷 Scansiona</button><button class="chip" data-a="prices">↻ Prezzi Sunlu</button>
     ${V.flt === 'out' && rows.length ? '<button class="chip" data-a="copyreorder">Copia lista</button>' : ''}</div>
@@ -728,7 +734,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v2.2</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v2.3</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
