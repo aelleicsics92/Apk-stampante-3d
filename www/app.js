@@ -394,6 +394,13 @@ function printSheet(p, isNew) {
 
 /* ---------- impostazioni ---------- */
 const RULES = '{\n  "rules": {\n    ".read": false,\n    ".write": false,\n    "archivi": {\n      "$code": { ".read": true, ".write": true }\n    }\n  }\n}';
+const SB_SQL = `create table if not exists spoolio (
+  code text not null, coll text not null, id text not null,
+  data jsonb, u bigint default 0, primary key (code, coll, id));
+alter table spoolio enable row level security;
+create policy "per codice" on spoolio for all
+  using (code = (current_setting('request.headers', true)::json->>'x-code'))
+  with check (code = (current_setting('request.headers', true)::json->>'x-code'));`;
 const cfg = () => ({ url: '', code: '', ...jget(CFG, {}) });
 const setCfg = c => jset(CFG, c);
 function viewSet() {
@@ -409,17 +416,20 @@ function viewSet() {
     ${srow('costoKg', 'Costo di riserva €/kg', 'se la bobina non ha un costo')}${srow('soglia', 'Soglia scorta bassa (g)', 'sotto = badge "Basso"')}</div>
   <div class="panel"><h3>Cloud condiviso</h3>
     <p class="hint" style="margin:0 0 10px">Stesso archivio su tutti i dispositivi. Senza cloud l'app funziona solo in locale.</p>
-    <div class="f"><label>URL database Firebase</label><input class="inp" id="c_url" type="text" ${OF} placeholder="https://xxx-default-rtdb.europe-west1.firebasedatabase.app" value="${esc(c.url)}"></div>
+    <div class="f"><label>URL database (Supabase o Firebase)</label><input class="inp" id="c_url" type="text" ${OF} placeholder="https://xxxx.supabase.co" value="${esc(c.url)}"></div>
+    <div class="f"><label>Chiave anon (solo Supabase)</label><input class="inp" id="c_key" type="text" ${OF} value="${esc(c.key || '')}"></div>
     <div class="f"><label>Codice archivio (segreto)</label><input class="inp" id="c_code" type="text" ${OF} value="${esc(c.code)}"></div>
     <div class="row"><button class="btn primary sm" data-a="syncnow">Sincronizza ora</button><button class="btn sm" data-a="newcode">Nuovo codice</button><button class="btn sm" data-a="sharelink">Condividi collegamento</button></div>
     <div class="f" style="margin-top:10px"><label>Incolla collegamento ricevuto</label><input class="inp" id="c_paste" type="text" ${OF} placeholder="spoolio:..."></div>
     <details><summary>Come attivarlo (2 minuti)</summary><ol>
-      <li>Vai su console.firebase.google.com, crea un progetto (senza Analytics).</li>
+      <li><b>Supabase (consigliato):</b> supabase.com, New project. SQL Editor, incolla lo script sotto, Run. Settings, API: copia Project URL e anon key.</li>
+      <li><b>Firebase:</b> console.firebase.google.com, crea un progetto (senza Analytics).</li>
       <li>Build, Realtime Database, Crea database (qualsiasi regione).</li>
       <li>Scheda Regole: incolla le regole qui sotto e Pubblica.</li>
       <li>Copia l'URL del database in cima alla scheda Dati e incollalo sopra.</li>
       <li>Premi "Condividi collegamento" e incollalo sugli altri dispositivi.</li></ol>
-      <pre class="code" id="rules">${esc(RULES)}</pre><button class="btn sm" data-a="copyrules">Copia regole</button></details></div>
+      <pre class="code" id="rules">${esc(RULES)}</pre><button class="btn sm" data-a="copyrules">Copia regole Firebase</button>
+      <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="export">Esporta backup</button><button class="btn sm" data-a="import">Importa backup</button><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
     <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v1.0</p></div>`;
 }
@@ -428,8 +438,8 @@ function bindSet() {
   root.onchange = e => {
     const k = e.target.dataset.k;
     if (k) { S.settings[k] = num(e.target.value); touch('settings', S.settings); }
-    if (e.target.id === 'c_url' || e.target.id === 'c_code') {
-      setCfg({ url: $('#c_url').value.trim().replace(/\.json$/, '').replace(/\/+$/, ''), code: $('#c_code').value.trim().replace(/[^A-Za-z0-9_-]/g, '') });
+    if (e.target.id === 'c_url' || e.target.id === 'c_code' || e.target.id === 'c_key') {
+      setCfg({ key: $('#c_key').value.trim(), url: $('#c_url').value.trim().replace(/\.json$/, '').replace(/\/+$/, ''), code: $('#c_code').value.trim().replace(/[^A-Za-z0-9_-]/g, '') });
       $('#c_code').value = cfg().code; S.meta.pushedAll = 0; save(); setDot(); if (cfgOK()) syncNow(true);
     }
     if (e.target.id === 'c_paste') { parseLink(e.target.value); e.target.value = ''; }
@@ -446,7 +456,7 @@ function parseLink(v) {
   try {
     const o = JSON.parse(atob(v.trim().replace(/^spoolio:/, '')));
     if (!o.u || !o.c) throw 0;
-    setCfg({ url: o.u, code: o.c }); S.meta.pushedAll = 0; save(); render(); toast('Collegato al cloud'); syncNow(true);
+    setCfg({ url: o.u, code: o.c, key: o.k || '' }); S.meta.pushedAll = 0; save(); render(); toast('Collegato al cloud'); syncNow(true);
   } catch { toast('Collegamento non valido'); }
 }
 const randCode = () => Array.from(crypto.getRandomValues(new Uint8Array(12)), b => 'abcdefghijkmnpqrstuvwxyz23456789'[b % 32]).join('');
@@ -473,13 +483,33 @@ async function importFile(f) {
 
 /* ---------- sync Firebase RTDB ---------- */
 const SY = { busy: false, t: null, state: 'off', msg: '' };
-const cfgOK = () => { const c = cfg(); return c.url && /^(https:\/\/|http:\/\/(localhost|127\.0\.0\.1))/.test(c.url) && c.code; };
+const isSb = () => /supabase\.co/.test(cfg().url) || !!cfg().key;
+const cfgOK = () => { const c = cfg(); return c.url && /^(https:\/\/|http:\/\/(localhost|127\.0\.0\.1))/.test(c.url) && c.code && (!isSb() || c.key); };
 const base = () => cfg().url + '/archivi/' + cfg().code;
 async function fb(path, opt = {}) {
   const r = await fetch(base() + path + '.json', { ...opt, headers: { 'Content-Type': 'application/json' } });
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
 }
+async function sb(q, opt = {}) {
+  const c = cfg(), r = await fetch(c.url + '/rest/v1/spoolio' + q, { ...opt, headers: { apikey: c.key, Authorization: 'Bearer ' + c.key, 'x-code': c.code, 'Content-Type': 'application/json', ...(opt.headers || {}) } });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const t = await r.text(); return t ? JSON.parse(t) : null;
+}
+const sbq = c => `?code=eq.${encodeURIComponent(cfg().code)}&coll=eq.${c}`;
+// interfaccia unica: Firebase RTDB oppure Supabase
+async function bGet(c) {
+  if (!isSb()) return (await fb('/' + c)) || {};
+  const o = {}; for (const r of (await sb(sbq(c) + '&select=id,data')) || []) o[r.id] = r.data; return o;
+}
+async function bPush(upd) { // upd: {'coll/id': rec}
+  if (!isSb()) return fb('', { method: 'PATCH', body: JSON.stringify(upd) });
+  const code = cfg().code, rows = Object.entries(upd).map(([k, d]) => { const [coll, id] = k.split('/'); return { code, coll, id, data: d, u: d.u || 0 }; });
+  return sb('?on_conflict=code,coll,id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(rows) });
+}
+async function bPhotoGet(id) { if (!isSb()) return fb('/photos/' + id); const r = await sb(sbq('photos') + '&id=eq.' + id + '&select=data'); return r && r[0] ? r[0].data : null; }
+async function bPhotoPut(id, d) { return isSb() ? bPush({ ['photos/' + id]: { d, u: Date.now() } }) : fb('/photos/' + id, { method: 'PUT', body: JSON.stringify(d) }); }
+async function bPhotoDel(id) { return isSb() ? sb(sbq('photos') + '&id=eq.' + id, { method: 'DELETE' }) : fb('/photos/' + id, { method: 'DELETE' }); }
 function setDot() {
   const b = $('#syncbtn'); if (!b) return;
   const st = !cfgOK() ? 'off' : SY.state;
@@ -491,7 +521,7 @@ async function syncNow(manual) {
   if (SY.busy) return; SY.busy = true; SY.state = 'busy'; setDot();
   try {
     const remote = {};
-    for (const c of ['filaments', 'prints', 'settings']) remote[c] = (await fb('/' + c)) || {};
+    for (const c of ['filaments', 'prints', 'settings']) remote[c] = await bGet(c);
     if (!S.meta.pushedAll && !Object.keys(remote.filaments).length && !Object.keys(remote.prints).length && !Object.keys(remote.settings).length) {
       S.filaments.forEach(r => S.meta.dirty['filaments:' + r.id] = 1); S.prints.forEach(r => S.meta.dirty['prints:' + r.id] = 1); S.meta.dirty['settings:main'] = 1;
     }
@@ -506,7 +536,7 @@ async function syncNow(manual) {
     if (rs && (rs.u || 0) > (S.settings.u || 0)) { S.settings = { ...DEF_SETTINGS, ...rs }; delete S.meta.dirty['settings:main']; changed = true; }
     // foto mancanti o aggiornate
     for (const p of S.prints) if (!p.d && p.foto && (!PHOTOS[p.id] || PHOTOS[p.id].fu < p.fu)) {
-      try { const d = await fb('/photos/' + p.id); if (d) { PHOTOS[p.id] = { fu: p.fu, data: d }; changed = true; } } catch { }
+      try { let d = await bPhotoGet(p.id); if (d && d.d) d = d.d; if (d) { PHOTOS[p.id] = { fu: p.fu, data: d }; changed = true; } } catch { }
     }
     jset(PH, PHOTOS);
     // push
@@ -515,10 +545,10 @@ async function syncNow(manual) {
       const [c, id] = k.split(':'), rec = c === 'settings' ? S.settings : S[c].find(x => x.id === id);
       if (rec) upd[c === 'settings' ? 'settings/main' : c + '/' + id] = rec;
     }
-    if (Object.keys(upd).length) await fb('', { method: 'PATCH', body: JSON.stringify(upd) });
+    if (Object.keys(upd).length) await bPush(upd);
     for (const id in S.meta.photoDirty) {
-      if (S.meta.photoDirty[id] === 1 && PHOTOS[id]) await fb('/photos/' + id, { method: 'PUT', body: JSON.stringify(PHOTOS[id].data) });
-      else await fb('/photos/' + id, { method: 'DELETE' });
+      if (S.meta.photoDirty[id] === 1 && PHOTOS[id]) await bPhotoPut(id, PHOTOS[id].data);
+      else await bPhotoDel(id);
     }
     S.meta.dirty = {}; S.meta.photoDirty = {}; save();
     SY.state = 'ok'; SY.msg = '';
@@ -559,7 +589,8 @@ document.addEventListener('click', e => {
     if (act === 'sync') { if (!cfgOK()) { V.tab = 'set'; render(); } else syncNow(true); return; }
     if (act === 'syncnow') { syncNow(true); return; }
     if (act === 'newcode') { $('#c_code').value = randCode(); $('#c_code').dispatchEvent(new Event('change', { bubbles: true })); return; }
-    if (act === 'sharelink') { const c = cfg(); if (!cfgOK()) { toast('Prima inserisci URL e codice'); return; } share('spoolio:' + btoa(JSON.stringify({ u: c.url, c: c.code })), 'Collegamento Spoolio'); return; }
+    if (act === 'sharelink') { const c = cfg(); if (!cfgOK()) { toast('Prima inserisci URL e codice'); return; } share('spoolio:' + btoa(JSON.stringify({ u: c.url, c: c.code, k: c.key || '' })), 'Collegamento Spoolio'); return; }
+    if (act === 'copysql') { share(SB_SQL, 'Script Supabase'); return; }
     if (act === 'copyrules') { share(RULES, 'Regole Firebase'); return; }
     if (act === 'copyreorder') { share('Da riordinare:\n' + list('filaments').filter(f => tot(f) <= 0 || f.riordina).map(f => '- ' + fname(f)).join('\n'), 'Lista riordino'); return; }
     if (act === 'export') { exportData(); return; }
