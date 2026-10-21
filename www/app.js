@@ -359,7 +359,7 @@ function viewCalc() {
   <button class="btn primary" style="width:100%" data-a="saveprint">Salva come stampa</button>`;
 }
 function rowHtml(r) {
-  return `<div class="crow"><input class="inp cname" type="text" ${OF} placeholder="Marca / colore" value="${esc(r.name)}" data-fid="${esc(r.fid || '')}"><input class="inp cg" type="number" min="0" step="any" inputmode="decimal" ${OF} placeholder="grammi" value="${esc(r.g)}"><button data-a="delrow" tabindex="-1">✕</button></div>`;
+  return `<div class="crow"><input class="inp cname" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Marca / colore" value="${esc(r.name)}" data-fid="${esc(r.fid || '')}"><input class="inp cg" type="number" min="0" step="any" inputmode="decimal" ${OF} placeholder="grammi" value="${esc(r.g)}"><button data-a="delrow" tabindex="-1">✕</button></div>`;
 }
 function bindRows(root, onChange) {
   $$('.crow', root).forEach(row => {
@@ -633,7 +633,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v1.6</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v1.7</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
