@@ -87,7 +87,7 @@ async function nget(url) {
   if (H && H.get) { const r = await H.get({ url, headers: { Accept: 'application/json' } }); if (r.status >= 400) throw new Error('HTTP ' + r.status); return typeof r.data === 'string' ? JSON.parse(r.data) : r.data; }
   const r = await fetch(url, { headers: { Accept: 'application/json' } }); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json();
 }
-const SUNLU = 'https://store.sunlu.com', PRK = 'spoolio_pr';
+const SUNLU = 'https://store.sunlu.com', PRK = 'spoolio_pr2';
 const okTitle = t => /filament|pla|petg|abs|tpu|asa|silk/i.test(t) && !/combo|bundle|spools|box|gift|dryer|printer|sample|sticker|nozzle/i.test(t);
 async function sunluLookup(f, cache) {
   for (const q of colorQueries(f)) {
@@ -132,7 +132,7 @@ async function productPrice(f, url) {
 let PRB = false;
 async function refreshPrices(force) {
   if (PRB) return;
-  if (!force && Date.now() - jget(PRK, 0) < 3600e3) return;
+  if (!force && Date.now() - jget(PRK, 0) < 600e3) return;
   const fs = list('filaments').filter(f => isSunlu(f) && f.auto !== 0 && (!f.url || /sunlu/i.test(f.url)));
   if (!fs.length) { if (force) toast('Nessuna bobina Sunlu da aggiornare'); return; }
   PRB = true; let n = 0, ok = 0;
@@ -661,7 +661,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v1.8</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v1.9</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
