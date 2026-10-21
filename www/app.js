@@ -338,7 +338,7 @@ function printCard(p) {
 /* ---------- calcolatore ---------- */
 const freshCS = () => ({ rows: [{ fid: '', name: '', g: '' }], h: '', m: '', x: '', l: '', pid: '' });
 let CS = freshCS();
-const prChips = (cur, attr) => { const L = S.settings.printers || []; return L.length > 1 ? `<div class="lab" style="margin:10px 0 4px">Stampante</div><div class="chips wrap">${L.map(p => `<button type="button" class="chip ${printerOf(cur).id === p.id ? 'on' : ''}" ${attr}="${p.id}">${esc(p.nome)}</button>`).join('')}</div>` : ''; };
+const prChips = (cur, attr) => { const L = S.settings.printers || [], c = printerOf(cur); return `<div class="lab" style="margin:10px 0 4px">Stampante</div><div class="chips wrap" style="padding:2px 0">${L.map(p => `<button type="button" class="chip ${c.id === p.id ? 'on' : ''}" ${attr}="${p.id}">🖨 ${esc(p.nome)}</button>`).join('')}</div><p class="hint" style="margin:2px 0 6px">${c.watt} W · usura ${eur(c.usuraOra)}/h</p>`; };
 function viewCalc() {
   return `<div class="res"><button class="rst" data-a="resetcalc">Azzera</button><div class="rl">Costo totale</div><div class="rbig" id="rtot">€0,00</div>
     <div class="rrow"><div><span>Prezzo consigliato</span><b id="rprice">€0</b></div><div><span>Guadagno</span><b id="rgain">€0</b></div></div>
@@ -449,12 +449,12 @@ function filSheet(f, pre) {
     <div class="f"><label>Tipo</label><input id="ft" type="text" ${OF} value="${esc(f.type)}" placeholder="es. PLA Matte"></div></div>
     <div class="f"><label>Colore</label><input id="fc" type="text" ${OF} value="${esc(f.color)}" placeholder="es. Grigio"></div>
     <div class="pick"><div class="sw big" id="fprev" style="background:${hx}"></div><div><div class="name" id="fpn"></div><div class="small">Scegli la tinta</div></div></div>
-    <div class="pal" id="pal">${PAL.map(([n, h]) => `<button type="button" class="pc" data-h="${h}" title="${n}" style="background:${h}"></button>`).join('')}<button type="button" class="pc cust" id="pcust" title="Colore personalizzato"></button></div>
     <div class="hsl" id="hsl" hidden>
       <div class="hr"><span>Tonalità</span><input type="range" id="hh" min="0" max="360" class="rng hue"></div>
       <div class="hr"><span>Intensità</span><input type="range" id="hs" min="0" max="100" class="rng"></div>
       <div class="hr"><span>Luce</span><input type="range" id="hl" min="0" max="100" class="rng"></div>
       <div class="hr"><span>Codice</span><input class="inp" id="hx" type="text" maxlength="7" ${OF}></div></div>
+    <div class="pal" id="pal">${PAL.map(([n, h]) => `<button type="button" class="pc" data-h="${h}" title="${n}" style="background:${h}"></button>`).join('')}<button type="button" class="pc cust" id="pcust" title="Colore personalizzato"></button></div>
     <input id="fh" type="hidden" value="${hx}">
     <div class="f"><label>Stato bobina</label><div class="chips wrap" id="fst" style="padding:2px 0">${[['', 'Non indicato'], ['sigillata', '🔒 Sigillata'], ['aperta', 'Aperta'], ['drybox', '📦 Dry Box'], ['essicca', '💧 Da essiccare']].map(([k, l]) => `<button type="button" class="chip ${stato === k ? 'on' : ''}" data-st="${k}">${l}</button>`).join('')}</div></div>
     <div class="f"><label>Link prodotto (opzionale)</label><input id="fu" type="text" ${OF} value="${esc(f.url)}" placeholder="https://..."></div>
@@ -489,7 +489,7 @@ function filSheet(f, pre) {
         if (fromPal && m && !$('#fc', el).value.trim()) $('#fc', el).value = m[0];
       };
       setHex($('#fh', el).value);
-      $('#pal', el).addEventListener('click', e => { const b = e.target.closest('.pc[data-h]'); if (b) setHex(b.dataset.h, true); });
+      $('#pal', el).addEventListener('click', e => { const b = e.target.closest('.pc[data-h]'); if (b) { setHex(b.dataset.h, true); $('#hsl', el).hidden = true; } });
       $('#pcust', el).onclick = () => { $('#hsl', el).hidden = !$('#hsl', el).hidden; };
       const fromSl = () => { const h = hsl2hex(+$('#hh', el).value, +$('#hs', el).value, +$('#hl', el).value); $('#hx', el).value = h; grad(+$('#hh', el).value, +$('#hs', el).value, +$('#hl', el).value); setHex(h, false, true); };
       ['#hh', '#hs', '#hl'].forEach(q => $(q, el).addEventListener('input', fromSl));
@@ -632,7 +632,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v1.4</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v1.5</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
@@ -838,3 +838,15 @@ render();
 if (cfgOK()) syncNow();
 setTimeout(() => refreshPrices(), 2500);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(() => refreshPrices(), 1500); });
+
+/* tastiera: il campo attivo resta visibile */
+document.addEventListener('focusin', e => {
+  if (!e.target.matches('input:not([type=range]):not([type=checkbox]):not([type=file]),textarea')) return;
+  document.body.classList.add('kb');
+  setTimeout(() => { try { e.target.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (x) { } }, 320);
+});
+document.addEventListener('focusout', () => setTimeout(() => { if (!document.activeElement || !document.activeElement.matches('input,textarea')) document.body.classList.remove('kb'); }, 250));
+
+const H0 = Math.max(innerHeight, screen.height * 0.5);
+const kbCheck = () => document.body.classList.toggle('kbopen', Math.min(innerHeight, (window.visualViewport || { height: 1e9 }).height) < H0 * 0.78);
+addEventListener('resize', kbCheck); if (window.visualViewport) visualViewport.addEventListener('resize', kbCheck);

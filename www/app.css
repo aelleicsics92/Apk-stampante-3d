@@ -145,3 +145,8 @@ a.badge{text-decoration:none;cursor:pointer}
 .scan .frame{position:relative;width:70vw;height:36vw;border:3px solid #34d399;border-radius:18px;box-shadow:0 0 0 100vmax rgba(0,0,0,.5)}
 .scan p{position:absolute;top:calc(14vh);color:#fff;font-weight:700}
 .scan button{position:absolute;bottom:calc(40px + var(--bot))}
+
+.sheet{max-height:92vh;max-height:92dvh}
+body.kb .sbody{padding-bottom:46vh}
+body.kb #app{padding-bottom:46vh}
+body.kbopen #tabs,body.kbopen #fab{display:none}
