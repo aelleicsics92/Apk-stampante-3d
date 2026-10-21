@@ -126,3 +126,22 @@ ol{padding-left:18px;margin:6px 0;font-size:.85rem}ol li{margin-bottom:4px}
 .pc.cust{background:conic-gradient(#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00);display:block}
 .pc.cust input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
 .res{position:relative}.rst{position:absolute;top:14px;right:14px;z-index:2;background:rgba(255,255,255,.2);color:#fff;font-weight:700;font-size:.78rem;padding:6px 12px;border-radius:99px}
+
+.b-b{background:#dbeafe;color:#1e40af}.b-o{background:#ffedd5;color:#9a3412}.b-gy{background:#f1f5f9;color:#475569}
+a.badge{text-decoration:none;cursor:pointer}
+.chips.wrap{flex-wrap:wrap;overflow:visible}
+.hsl{background:#f8fafc;border-radius:16px;padding:12px;margin:-4px 0 14px;display:grid;gap:10px}
+.hsl[hidden]{display:none}
+.hr{display:grid;grid-template-columns:84px 1fr;gap:10px;align-items:center;font-size:.76rem;font-weight:700;color:var(--mut)}
+.rng{-webkit-appearance:none;appearance:none;height:16px;border-radius:99px;outline:0;width:100%;margin:0;background:#ddd}
+.rng::-webkit-slider-thumb{-webkit-appearance:none;width:28px;height:28px;border-radius:50%;background:#fff;box-shadow:0 0 0 2px rgba(0,0,0,.25),0 3px 8px rgba(0,0,0,.3)}
+.rng.hue{background:linear-gradient(90deg,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)}
+.pc.cust{display:block}
+.prow{display:grid;grid-template-columns:1fr 64px 72px 32px;gap:6px;margin-bottom:6px;align-items:center}
+.prow.ph{font-size:.68rem;text-transform:uppercase;font-weight:700;color:var(--mut)}
+.prow button{height:36px;border-radius:10px;background:#fee2e2;color:#b91c1c;font-weight:800}
+.scan{position:fixed;inset:0;background:#000;z-index:120;display:grid;place-items:center}
+.scan video{width:100%;height:100%;object-fit:cover;position:absolute;inset:0}
+.scan .frame{position:relative;width:70vw;height:36vw;border:3px solid #34d399;border-radius:18px;box-shadow:0 0 0 100vmax rgba(0,0,0,.5)}
+.scan p{position:absolute;top:calc(14vh);color:#fff;font-weight:700}
+.scan button{position:absolute;bottom:calc(40px + var(--bot))}
