@@ -99,36 +99,64 @@ async function sunluLookup(f, cache) {
   }
   return null;
 }
-async function eurRate() {
+const rateCache = {};
+async function eurRate(origin) {
+  if (origin in rateCache) return rateCache[origin];
+  let r = 0;
   try {
-    const c = (await nget(SUNLU + '/cart.js')).currency;
-    if (!c || c === 'EUR') return 1;
-    return (await nget('https://api.frankfurter.app/latest?from=' + c + '&to=EUR')).rates.EUR || 0;
-  } catch { return 0; }
+    const c = (await nget(origin + '/cart.js')).currency;
+    r = !c || c === 'EUR' ? 1 : ((await nget('https://api.frankfurter.app/latest?from=' + c + '&to=EUR')).rates.EUR || 0);
+  } catch { r = 0; }
+  return (rateCache[origin] = r);
+}
+const spoolsOf = t => { const m = t.match(/(\d+)\s*(?:x\s*)?(?:spools?|rolls?|pcs|pack|bobine)/i) || t.match(/(\d+)\s*kg/i); return m ? Math.max(1, +m[1]) : 1; };
+/* prezzo per UNA bobina da 1 kg dalla pagina prodotto (variante del colore giusto) */
+async function productPrice(f, url) {
+  const m = url.match(/^(https?:\/\/[^/]*sunlu[^/]*)\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?products\/([^/?#]+)/i); if (!m) return null;
+  const d = await nget(`${m[1]}/products/${m[2]}.js`), vs = d.variants || []; if (!vs.length) return null;
+  const vtxt = v => [v.title, v.option1, v.option2, v.option3].filter(Boolean).join(' ');
+  const per = v => v.price / 100 / spoolsOf(vtxt(v));
+  const vid = (url.match(/[?&]variant=(\d+)/) || [])[1];
+  let pick = vid ? vs.find(v => String(v.id) === vid) : null;
+  if (!pick) {
+    const outer = f.color.replace(/\(.*?\)/g, '').trim(), inner = (f.color.match(/\((.*?)\)/) || [])[1] || '';
+    const words = [...new Set([outer, inner].filter(Boolean).flatMap(c => [...c.toLowerCase().split(/\s+/), ...trWords(c).toLowerCase().split(/\s+/)]))].filter(w => w.length > 2 && !['matte', 'matt', 'pla'].includes(w));
+    const sc = v => words.filter(w => vtxt(v).toLowerCase().includes(w)).length;
+    const best = Math.max(...vs.map(sc));
+    let pool = best > 0 ? vs.filter(v => sc(v) === best) : vs;
+    const one = pool.filter(v => spoolsOf(vtxt(v)) === 1); if (one.length) pool = one;
+    pick = pool.reduce((a, v) => (per(v) < per(a) ? v : a), pool[0]);
+  }
+  return { price: per(pick), origin: m[1], variant: vtxt(pick) };
 }
 let PRB = false;
 async function refreshPrices(force) {
   if (PRB) return;
   if (!force && Date.now() - jget(PRK, 0) < 3600e3) return;
-  const fs = list('filaments').filter(f => isSunlu(f) && f.auto !== 0);
+  const fs = list('filaments').filter(f => isSunlu(f) && f.auto !== 0 && (!f.url || /sunlu/i.test(f.url)));
   if (!fs.length) { if (force) toast('Nessuna bobina Sunlu da aggiornare'); return; }
   PRB = true; let n = 0, ok = 0;
   try {
-    const rate = await eurRate(), cache = {};
+    const cache = {};
     for (const f of fs) {
-      const r = await sunluLookup(f, cache); if (!r) continue; ok++;
-      let ch = false;
-      if ((!f.url || f.urlAuto) && f.url !== r.url) { f.url = r.url; f.urlAuto = 1; ch = true; }
-      const pr = Math.round(r.price * rate * 100) / 100;
-      if ((f.costo || 0) > 25) { f.costo = 12.99; ch = true; } // valore sbagliato (pack da piu' bobine): ripristina
-      if (rate && pr >= 6 && pr <= 25) { if (Math.abs((f.costo || 0) - pr) > 0.004) { f.costo = pr; ch = true; } if (!f.pagg || ch) f.pagg = Date.now(); }
-      if (ch) { touch('filaments', f); n++; }
+      try {
+        let url = f.url, ch = false;
+        if (!/\/products\//.test(url || '')) {
+          const r = await sunluLookup(f, cache); if (!r) continue;
+          url = r.url; if (!f.url || f.urlAuto) { f.url = url; f.urlAuto = 1; ch = true; }
+        }
+        const pv = await productPrice(f, url); if (!pv) continue; ok++;
+        const rate = await eurRate(pv.origin), pr = Math.round(pv.price * rate * 100) / 100;
+        if ((f.costo || 0) > 25) { f.costo = 12.99; ch = true; }
+        if (rate && pr >= 6 && pr <= 25) { if (Math.abs((f.costo || 0) - pr) > 0.004) { f.costo = pr; ch = true; } if (f.pvar !== pv.variant) { f.pvar = pv.variant; ch = true; } if (!f.pagg || ch) f.pagg = Date.now(); }
+        if (ch) { touch('filaments', f); n++; }
+      } catch (e) { console.warn(e); }
     }
     if (ok) jset(PRK, Date.now());
   } catch (e) { console.warn(e); }
   PRB = false;
   if (n && !sheet && V.tab === 'mag') render();
-  if (force) toast(ok ? `Prezzi e link aggiornati (${n} modificati)` : 'Sito Sunlu non raggiungibile');
+  if (force) toast(ok ? `Prezzi aggiornati (${n} modificati su ${ok})` : 'Sito Sunlu non raggiungibile');
 }
 /* costi */
 const printerOf = id => { const L = S.settings.printers || []; return L.find(p => p.id === id) || L[0] || { id: 'p1', nome: 'Stampante', watt: S.settings.watt || 150, usuraOra: S.settings.usuraOra || 0.25 }; };
@@ -466,7 +494,7 @@ function filSheet(f, pre) {
     <div class="g2"><div class="f"><label>Residuo totale g</label><input id="fr" type="number" min="0" step="any" inputmode="decimal" ${OF} value="${Math.round(f.residuo)}"></div>
     <div class="f"><label>Costo bobina €</label><input id="fk" type="number" min="0" step="any" inputmode="decimal" ${OF} value="${f.costo || ''}"></div></div>
     <label class="row" style="font-size:.86rem;font-weight:600;margin-bottom:4px"><input id="fau" type="checkbox" ${f.auto !== 0 ? 'checked' : ''}> Prezzo e link automatici dal sito (solo Sunlu)</label>
-    ${f.pagg ? `<p class="hint" style="margin:0 0 10px">Prezzo letto dal sito il ${new Date(f.pagg).toLocaleDateString('it-IT')}</p>` : '<div style="height:8px"></div>'}
+    ${f.pagg ? `<p class="hint" style="margin:0 0 10px">Prezzo letto dal sito il ${new Date(f.pagg).toLocaleDateString('it-IT')}${f.pvar ? ' (variante: ' + esc(f.pvar) + ')' : ''}</p>` : '<div style="height:8px"></div>'}
     <div class="f"><label>Codice a barre / QR</label><div class="row" style="flex-wrap:nowrap"><input id="fbc" class="inp" type="text" ${OF} value="${esc(f.barcode || '')}" placeholder="scansiona o scrivi"><button class="btn sm" type="button" id="fscan">📷</button></div></div>
     <div class="f"><label>Note</label><input id="fno" type="text" ${OF} value="${esc(f.note)}"></div>
     <label class="row" style="font-size:.9rem;font-weight:600"><input id="fri" type="checkbox" ${f.riordina ? 'checked' : ''}> Da riordinare</label>`;
@@ -633,7 +661,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v1.7</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v1.8</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
