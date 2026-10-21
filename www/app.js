@@ -20,6 +20,12 @@ const BRANDS = {
   'flashforge': 'flashforge.com', 'prusament': 'prusa3d.com', 'geeetech': 'geeetech.com', 'siraya tech': 'siraya.tech',
   'hatchbox': 'hatchbox3d.com', 'fiberlogy': 'fiberlogy.com', 'filamentive': 'filamentive.com', 'fillamentum': 'fillamentum.com',
 };
+const PAL = [['Nero', '#1a1a1a'], ['Antracite', '#3b3f45'], ['Grigio', '#8b9097'], ['Grigio chiaro', '#c9cdd2'], ['Bianco', '#f6f6f4'], ['Bone', '#eee5d0'], ['Beige', '#e3cfb4'], ['Sabbia', '#d8b98a'],
+  ['Rosso', '#d62828'], ['Ciliegia', '#a4161a'], ['Corallo', '#ff6b6b'], ['Sakura', '#f7c6d4'], ['Rosa', '#f7a8c4'], ['Fucsia', '#e91e8c'], ['Magenta', '#d6249f'], ['Pesca', '#ffb48a'],
+  ['Arancio', '#ff8a1f'], ['Terracotta', '#c8553d'], ['Giallo', '#f8d21b'], ['Oro', '#d4a72c'], ['Senape', '#c79a1d'], ['Lime', '#a3d93b'], ['Verde', '#3f9d46'], ['Foresta', '#1f6b3a'],
+  ['Oliva', '#6b7a2a'], ['Salvia', '#9db38a'], ['Menta', '#a6e6d0'], ['Verde acqua', '#2cc5b0'], ['Ice', '#bfe4f3'], ['Azzurro', '#6ec1f0'], ['Cielo', '#4aa3df'], ['Blu', '#2563eb'],
+  ['Klein', '#002fa7'], ['Navy', '#1c2541'], ['Oceano', '#1b6ca8'], ['Blu grey', '#6f8397'], ['Lavanda', '#c8b5ea'], ['Lilla', '#b9a2d8'], ['Viola', '#7c3aed'], ['Prugna', '#5b2a6e'],
+  ['Galaxy', '#4f4a8f'], ['Cioccolato', '#5b3a29'], ['Caffe', '#7a4a2b'], ['Quercia', '#b38a58'], ['Argilla', '#b8704f'], ['Argento', '#c0c0c8'], ['Rame', '#b87333'], ['Bronzo', '#8c6a3f']];
 const TYPES = ['PLA', 'PLA+', 'PLA Matte', 'PLA Silk', 'PLA Basic', 'PLA Marble', 'PLA Galaxy', 'PETG', 'ABS', 'ASA', 'TPU', 'PA', 'PC'];
 
 /* ---------- stato ---------- */
@@ -27,6 +33,11 @@ let S = jget(KEY, null);
 if (!S || !S.filaments) S = seedState();
 S.settings = { ...DEF_SETTINGS, ...S.settings };
 S.meta = { dirty: {}, photoDirty: {}, pushedAll: 0, ...S.meta };
+if (!S.meta.mig2) { // migrazione unica: marca Sunlu e costo 12,99 sulle bobine gia' presenti
+  S.meta.mig2 = 1;
+  for (const f of S.filaments) if (f.id.startsWith('f_') && !f.d) { if (!f.brand) f.brand = 'Sunlu'; if (!(f.costo > 0)) f.costo = 12.99; f.u = Date.now(); S.meta.dirty['filaments:' + f.id] = 1; }
+  jset(KEY, S);
+}
 let PHOTOS = jget(PH, {});
 let V = { tab: 'mag', q: '', flt: 'all', pq: '' };
 const save = () => jset(KEY, S);
@@ -44,12 +55,17 @@ const tot = f => (f.nuove || 0) + (f.usate || 0);
 const gcost = f => (f.costo > 0 ? f.costo / (f.peso || 1000) : S.settings.costoKg / 1000);
 const gSearch = q => 'https://www.google.com/search?q=' + encodeURIComponent(q);
 const site = b => BRANDS[(b || '').toLowerCase().trim()];
+const IT_EN = { grigio: 'grey', giallo: 'yellow', rosa: 'pink', bianco: 'white', verde: 'green', blu: 'blue', rosso: 'red', nero: 'black', arancio: 'orange', viola: 'purple' };
 function productLink(f) {
   if (f.url) return f.url;
+  if ((f.brand || '').toLowerCase().trim() === 'sunlu') {
+    const col = f.color.replace(/\(.*?\)/g, '').split(/\s+/).filter(Boolean).map(w => IT_EN[w.toLowerCase()] || w).join(' ');
+    return 'https://store.sunlu.com/search?type=product&q=' + encodeURIComponent((f.type || 'PLA') + ' ' + col);
+  }
   const s = site(f.brand);
   return s ? gSearch(`site:${s} ${f.type || ''} ${f.color}`.replace(/\s+/g, ' ')) : gSearch(`${fname(f)} filamento 3D`);
 }
-const brandLink = f => site(f.brand) ? 'https://' + site(f.brand) : gSearch(f.brand + ' filamento 3D');
+const brandLink = f => site(f.brand) ? 'https://' + (site(f.brand) === 'sunlu.com' ? 'store.sunlu.com' : site(f.brand)) : gSearch(f.brand + ' filamento 3D');
 function openUrl(u) {
   try {
     const B = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Browser;
@@ -145,10 +161,28 @@ function openSheet(title, body, o = {}) {
     else if (e.key === 'Enter' && e.target.matches('input:not([type=file]):not([type=checkbox])')) { e.preventDefault(); doSave(); }
   });
   if (o.init) o.init(el);
-  const first = $('input:not([type=color]):not([type=file])', el); if (first) first.focus();
+  const sh = $('.sheet', el), sb = $('.sbody', el); let y0 = 0, dy = 0, drag = false, t0 = 0, hdr = false;
+  sh.addEventListener('touchstart', e => { y0 = e.touches[0].clientY; dy = 0; drag = false; t0 = Date.now(); hdr = !e.target.closest('.sbody'); }, { passive: true });
+  sh.addEventListener('touchmove', e => {
+    const d = e.touches[0].clientY - y0;
+    if (!drag) { if (d > 8 && (hdr || sb.scrollTop <= 0) && !e.target.closest('.sbtns')) { drag = true; acBoxes.forEach(b => b.hidden = true); if (document.activeElement) document.activeElement.blur(); } else return; }
+    dy = Math.max(0, d); sh.style.transition = 'none'; sh.style.transform = `translateY(${dy}px)`; el.style.background = `rgba(15,23,42,${.45 * Math.max(0, 1 - dy / 500)})`; e.preventDefault();
+  }, { passive: false });
+  sh.addEventListener('touchend', () => {
+    if (!drag) return; drag = false;
+    sh.style.transition = 'transform .18s';
+    if (dy > 110 || dy / Math.max(1, Date.now() - t0) > .6) { sh.style.transform = 'translateY(100%)'; setTimeout(closeSheet, 170); }
+    else { sh.style.transform = ''; el.style.background = ''; }
+  });
 }
 function removeSheet() { if (sheet) { sheet.el.remove(); sheet = null; } clearAC(); }
 function closeSheet() { removeSheet(); if (history.state && history.state.sheet) { skipPop = true; history.back(); } }
+try {
+  const A = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+  if (A && A.addListener) A.addListener('backButton', () => {
+    if (sheet) closeSheet(); else if (V.tab !== 'mag') { V.tab = 'mag'; render(); } else if (A.exitApp) A.exitApp();
+  });
+} catch (e) { }
 addEventListener('popstate', () => { if (skipPop) { skipPop = false; return; } removeSheet(); });
 
 /* ---------- render ---------- */
@@ -168,15 +202,15 @@ function viewMag() {
   const nOut = all.filter(f => out(f) || f.riordina).length;
   const q = V.q.toLowerCase();
   let rows = all.filter(f => (!q || (fname(f) + ' ' + f.note).toLowerCase().includes(q)) && ({
-    all: () => true, stock: () => !out(f), low: () => low(f), out: () => out(f) || f.riordina,
+    all: () => true, stock: () => !out(f), low: () => low(f), out: () => out(f) || f.riordina, new: () => f.nuove > 0, used: () => f.usate > 0,
   })[V.flt]());
   rows.sort((a, b) => (out(a) - out(b)) || fname(a).localeCompare(fname(b)));
   const nm = all.filter(f => !f.brand).length;
   return `<div class="stats">
-    <div class="stat"><b>${all.filter(f => !out(f)).length}</b><span>Tipi</span></div>
-    <div class="stat"><b>${all.reduce((a, f) => a + (f.nuove || 0), 0)}</b><span>Nuove</span></div>
-    <div class="stat"><b>${all.reduce((a, f) => a + (f.usate || 0), 0)}</b><span>Usate</span></div>
-    <div class="stat ${nOut ? 'warn' : ''}"><b>${nOut}</b><span>Riordina</span></div></div>
+    <button class="stat ${V.flt === 'stock' ? 'on' : ''}" data-a="flt" data-t="1" data-k="stock"><b>${all.filter(f => !out(f)).length}</b><span>Tipi</span></button>
+    <button class="stat ${V.flt === 'new' ? 'on' : ''}" data-a="flt" data-t="1" data-k="new"><b>${all.reduce((a, f) => a + (f.nuove || 0), 0)}</b><span>Nuove</span></button>
+    <button class="stat ${V.flt === 'used' ? 'on' : ''}" data-a="flt" data-t="1" data-k="used"><b>${all.reduce((a, f) => a + (f.usate || 0), 0)}</b><span>Usate</span></button>
+    <button class="stat ${nOut ? 'warn' : ''} ${V.flt === 'out' ? 'on' : ''}" data-a="flt" data-t="1" data-k="out"><b>${nOut}</b><span>Riordina</span></button></div>
   <input class="search" id="q" type="text" ${OF} placeholder="Cerca marca, tipo o colore" value="${esc(V.q)}">
   <div class="chips">${[['all', 'Tutti'], ['stock', 'In scorta'], ['low', 'Bassi'], ['out', 'Da riordinare']].map(([k, l]) => `<button class="chip ${V.flt === k ? 'on' : ''}" data-a="flt" data-k="${k}">${l}</button>`).join('')}
     ${V.flt === 'out' && rows.length ? '<button class="chip" data-a="copyreorder">Copia lista</button>' : ''}</div>
@@ -226,9 +260,10 @@ function printCard(p) {
 }
 
 /* ---------- calcolatore ---------- */
-let CS = jget(CALC, { rows: [{ fid: '', name: '', g: '' }], h: '', m: '' });
+const freshCS = () => ({ rows: [{ fid: '', name: '', g: '' }], h: '', m: '' });
+let CS = freshCS();
 function viewCalc() {
-  return `<div class="res"><div class="rl">Costo totale</div><div class="rbig" id="rtot">€0,00</div>
+  return `<div class="res"><button class="rst" data-a="resetcalc">Azzera</button><div class="rl">Costo totale</div><div class="rbig" id="rtot">€0,00</div>
     <div class="rrow"><div><span>Prezzo consigliato</span><b id="rprice">€0</b></div><div><span>Guadagno</span><b id="rgain">€0</b></div></div>
     <div class="rl" id="rest" style="margin-top:8px;text-transform:none"></div></div>
   <div class="panel"><h3>Filamenti</h3><div id="crows">${CS.rows.map(rowHtml).join('')}</div>
@@ -258,7 +293,7 @@ const readRows = root => $$('.crow', root).map(r => ({ fid: $('.cname', r).datas
 function bindCalc() {
   const root = $('#view');
   const upd = () => {
-    CS = { rows: readRows($('#crows')), h: $('#ch').value, m: $('#cm').value }; jset(CALC, CS);
+    CS = { rows: readRows($('#crows')), h: $('#ch').value, m: $('#cm').value };
     const min = num(CS.h) * 60 + num(CS.m), r = calc(CS.rows.map(x => ({ f: fil(x.fid), g: num(x.g) })), min);
     $('#rtot').textContent = eur(r.tot); $('#rprice').textContent = eur(r.price); $('#rgain').textContent = eur(r.price - r.tot);
     $('#rest').textContent = r.est ? '* include costo stimato (€/kg di riserva) per bobine senza costo' : '';
@@ -275,6 +310,7 @@ function bindCalc() {
   function addRow() { $('#crows').insertAdjacentHTML('beforeend', rowHtml({ fid: '', name: '', g: '' })); bindRows(root, upd); $$('.cname').pop().focus(); }
   root.onclick = e => {
     const b = e.target.closest('[data-a]'); if (!b) return;
+    if (b.dataset.a === 'resetcalc') { CS = freshCS(); render(); return; }
     if (b.dataset.a === 'addrow') addRow();
     if (b.dataset.a === 'delrow') { if ($$('.crow').length > 1) b.closest('.crow').remove(); else { $('.cname').value = ''; $('.cname').dataset.fid = ''; $('.cg').value = ''; } upd(); }
     if (b.dataset.a === 'saveprint') {
@@ -292,8 +328,10 @@ function filSheet(f) {
   const isNew = !f; f = f || { id: uid(), brand: '', type: '', color: '', hex: '#10b981', url: '', nuove: 1, usate: 0, peso: 1000, residuo: 1000, costo: 0, note: '', riordina: 0 };
   const body = `<div class="g2"><div class="f"><label>Marca</label><input id="fb" type="text" ${OF} value="${esc(f.brand)}" placeholder="es. Sunlu"></div>
     <div class="f"><label>Tipo</label><input id="ft" type="text" ${OF} value="${esc(f.type)}" placeholder="es. PLA Matte"></div></div>
-    <div class="g2"><div class="f"><label>Colore</label><input id="fc" type="text" ${OF} value="${esc(f.color)}" placeholder="es. Grigio"></div>
-    <div class="f"><label>Tinta</label><input id="fh" type="color" value="${esc(f.hex || '#10b981')}" style="height:42px;padding:3px"></div></div>
+    <div class="f"><label>Colore</label><input id="fc" type="text" ${OF} value="${esc(f.color)}" placeholder="es. Grigio"></div>
+    <div class="pick"><div class="sw big" id="fprev" style="background:${esc(f.hex || '#10b981')}"></div><div><div class="name" id="fpn"></div><div class="small">Scegli la tinta</div></div></div>
+    <div class="pal" id="pal">${PAL.map(([n, h]) => `<button type="button" class="pc" data-h="${h}" title="${n}" style="background:${h}"></button>`).join('')}<label class="pc cust" title="Personalizzato"><input type="color" id="fhc" value="${esc((f.hex || '#10b981').slice(0, 7))}"></label></div>
+    <input id="fh" type="hidden" value="${esc(f.hex || '#10b981')}">
     <div class="f"><label>Link prodotto (opzionale)</label><input id="fu" type="text" ${OF} value="${esc(f.url)}" placeholder="https://..."></div>
     <div class="row" style="margin:-4px 0 10px"><button class="btn sm" type="button" id="fsearch">🔍 Cerca sul sito</button><button class="btn sm" type="button" id="fopen">↗ Apri link</button></div>
     <div class="g3"><div class="f"><label>Nuove</label><input id="fn" type="number" min="0" step="1" inputmode="numeric" ${OF} value="${f.nuove}"></div>
@@ -311,6 +349,17 @@ function filSheet(f) {
       const est = () => { if (!$('#fr', el).dataset.m) $('#fr', el).value = Math.round(num($('#fn', el).value) * num($('#fp', el).value) + num($('#fus', el).value) * num($('#fp', el).value) / 2); };
       ['#fn', '#fus', '#fp'].forEach(s => $(s, el).addEventListener('input', est));
       $('#fr', el).addEventListener('input', () => $('#fr', el).dataset.m = 1);
+      const setHex = (h, fromPal) => {
+        $('#fh', el).value = h; $('#fprev', el).style.background = h; $('#fhc', el).value = h.slice(0, 7);
+        const m = PAL.find(p => p[1].toLowerCase() === h.toLowerCase());
+        $$('.pc[data-h]', el).forEach(b => b.classList.toggle('on', !!m && b.dataset.h.toLowerCase() === h.toLowerCase()));
+        $('#fpn', el).textContent = m ? m[0] : 'Personalizzato';
+        if (fromPal && m && !$('#fc', el).value.trim()) $('#fc', el).value = m[0];
+      };
+      setHex($('#fh', el).value);
+      $('#pal', el).addEventListener('click', e => { const b = e.target.closest('.pc[data-h]'); if (b) setHex(b.dataset.h, true); });
+      $('#fhc', el).addEventListener('input', e => setHex(e.target.value));
+      $('#fc', el).addEventListener('input', e => { const m = PAL.find(p => p[0].toLowerCase() === e.target.value.trim().toLowerCase()); if (m) setHex(m[1]); });
       const tmp = () => ({ brand: $('#fb', el).value.trim(), type: $('#ft', el).value.trim(), color: $('#fc', el).value.trim(), url: $('#fu', el).value.trim() });
       $('#fsearch', el).onclick = () => openUrl(productLink({ ...tmp(), url: '' }));
       $('#fopen', el).onclick = () => openUrl(productLink(tmp()));
@@ -584,7 +633,7 @@ document.addEventListener('click', e => {
     if (act === 'edit') { e.stopPropagation(); filSheet(fil(id)); return; }
     if (act === 'n') { e.stopPropagation(); stepFil(id, a.dataset.k, +a.dataset.d); return; }
     if (act === 'pn') { e.stopPropagation(); stepPrint(id, +a.dataset.d); return; }
-    if (act === 'flt') { V.flt = a.dataset.k; render(); return; }
+    if (act === 'flt') { V.flt = (a.dataset.t && V.flt === a.dataset.k) ? 'all' : a.dataset.k; render(); return; }
     if (act === 'add') { V.tab === 'print' ? printSheet() : filSheet(); return; }
     if (act === 'sync') { if (!cfgOK()) { V.tab = 'set'; render(); } else syncNow(true); return; }
     if (act === 'syncnow') { syncNow(true); return; }
