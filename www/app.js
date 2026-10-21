@@ -95,7 +95,7 @@ async function sunluLookup(f, cache) {
       try { const d = await nget(`${SUNLU}/search/suggest.json?q=${encodeURIComponent(q)}&resources[type]=product&resources[limit]=6`); cache[q] = (d.resources && d.resources.results && d.resources.results.products) || []; } catch { cache[q] = []; }
     }
     const p = cache[q].find(x => okTitle(x.title || ''));
-    if (p) return { url: SUNLU + String(p.url).split('?')[0], price: parseFloat(p.price) || 0 };
+    if (p) { let pr = parseFloat(p.price) || 0; if (pr >= 100 && /^\d+$/.test(String(p.price))) pr /= 100; return { url: SUNLU + String(p.url).split('?')[0], price: pr }; }
   }
   return null;
 }
@@ -120,7 +120,8 @@ async function refreshPrices(force) {
       let ch = false;
       if ((!f.url || f.urlAuto) && f.url !== r.url) { f.url = r.url; f.urlAuto = 1; ch = true; }
       const pr = Math.round(r.price * rate * 100) / 100;
-      if (rate && pr >= 3 && pr <= 40) { if (Math.abs((f.costo || 0) - pr) > 0.004) { f.costo = pr; ch = true; } if (!f.pagg || ch) f.pagg = Date.now(); }
+      if ((f.costo || 0) > 25) { f.costo = 12.99; ch = true; } // valore sbagliato (pack da piu' bobine): ripristina
+      if (rate && pr >= 6 && pr <= 25) { if (Math.abs((f.costo || 0) - pr) > 0.004) { f.costo = pr; ch = true; } if (!f.pagg || ch) f.pagg = Date.now(); }
       if (ch) { touch('filaments', f); n++; }
     }
     if (ok) jset(PRK, Date.now());
@@ -632,7 +633,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v1.5</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v1.6</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
