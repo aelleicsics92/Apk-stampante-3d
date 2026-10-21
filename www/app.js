@@ -54,6 +54,17 @@ function touch(coll, rec) {
 /* ---------- logica filamenti / costi ---------- */
 const fname = f => [f.brand, f.type, f.color].filter(Boolean).join(' ');
 const tot = f => (f.nuove || 0) + (f.usate || 0);
+const gTot = f => (f.nuove || 0) * (f.peso || 1000) + (f.residuo || 0);
+function reWhy(f) {
+  if (f.ignora) return '';
+  const st = S.settings;
+  if (tot(f) <= 0) return '0 bobine';
+  if (f.riordina) return 'Forzato';
+  if (st.sogliaNuove > 0 && (f.nuove || 0) < st.sogliaNuove) return (f.nuove || 0) + ' nuove';
+  if (st.sogliaGr > 0 && gTot(f) < st.sogliaGr) return Math.round(gTot(f)) + ' g rimasti';
+  return '';
+}
+const needRe = f => !!reWhy(f);
 const gcost = f => (f.costo > 0 ? f.costo / (f.peso || 1000) : S.settings.costoKg / 1000);
 const gSearch = q => 'https://www.google.com/search?q=' + encodeURIComponent(q);
 const site = b => BRANDS[(b || '').toLowerCase().trim()];
@@ -114,7 +125,7 @@ const spoolsOf = t => { const m = t.match(/(\d+)\s*(?:x\s*)?(?:spools?|rolls?|pc
 async function productPrice(f, url) {
   const m = url.match(/^(https?:\/\/[^/]*sunlu[^/]*)\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?products\/([^/?#]+)/i); if (!m) return null;
   const d = await nget(`${m[1]}/products/${m[2]}.js`), vs = d.variants || []; if (!vs.length) return null;
-  const vtxt = v => [v.title, v.option1, v.option2, v.option3].filter(Boolean).join(' ');
+  const vtxt = v => v.title || [v.option1, v.option2, v.option3].filter(Boolean).join(' / ');
   const per = v => v.price / 100 / spoolsOf(vtxt(v));
   const vid = (url.match(/[?&]variant=(\d+)/) || [])[1];
   let pick = vid ? vs.find(v => String(v.id) === vid) : null;
@@ -130,17 +141,53 @@ async function productPrice(f, url) {
   return { price: per(pick), origin: m[1], variant: vtxt(pick), id: pick.id };
 }
 async function cartSheet() {
-  const fs = list('filaments').filter(f => (tot(f) <= 0 || f.riordina) && /^https?:\/\/[^/]+\/(?:[a-z-]+\/)?products\//i.test(f.url || ''));
+  const fs = list('filaments').filter(f => needRe(f) && /^https?:\/\/[^/]+\/(?:[a-z-]+\/)?products\//i.test(f.url || ''));
   if (!fs.length) { toast('Nessuna bobina da riordinare con link prodotto'); return; }
   toast('Preparo il carrello…'); const it = [];
-  for (const f of fs) { try { const pv = await productPrice(f, f.url); if (pv) it.push({ f, o: pv.origin, id: pv.id, v: pv.variant }); } catch (e) { console.warn(e); } }
+  for (const f of fs) {
+    try {
+      const pv = await productPrice(f, f.url); if (!pv) continue;
+      const rate = await eurRate(pv.origin), pr = rate ? Math.round(pv.price * rate * 100) / 100 : (f.costo || 0);
+      it.push({ f, o: pv.origin, id: pv.id, v: pv.variant, pr, q: 1, on: true, why: reWhy(f) });
+    } catch (e) { console.warn(e); }
+  }
   if (!it.length) { toast('Impossibile leggere gli store'); return; }
-  const body = it.map((x, i) => `<div class="row" style="justify-content:space-between;gap:8px;margin:6px 0"><span style="font-size:.88rem">${esc(fname(x.f))}<br><small style="color:#6b7280">${esc(new URL(x.o).host)} · ${esc(x.v)}</small></span><input class="cq" data-i="${i}" type="number" inputmode="numeric" min="0" value="1" style="width:56px"></div>`).join('');
+  const eur = n => n.toFixed(2).replace('.', ',') + ' €';
+  const row = (x, i) => `<div class="crow ${x.on ? '' : 'off'}" data-i="${i}" style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f1f5f9">
+    <input type="checkbox" class="cc" ${x.on ? 'checked' : ''} style="width:20px;height:20px;flex:none">
+    <span style="width:14px;height:14px;border-radius:50%;background:${esc(x.f.hex || '#999')};border:1px solid #0002;flex:none"></span>
+    <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:.9rem">${esc(fname(x.f))}</div>
+      <div style="font-size:.72rem;color:#6b7280">${esc(x.v)} · ${eur(x.pr)}${x.why ? ` · <span class="badge b-amb" style="padding:1px 6px">${esc(x.why)}</span>` : ''}</div></div>
+    <div style="display:flex;align-items:center;gap:4px;flex:none"><button class="btn ghost cm" style="padding:2px 10px">−</button><b class="cn" style="min-width:18px;text-align:center">${x.q}</b><button class="btn ghost cp" style="padding:2px 10px">+</button></div>
+    <b class="ct" style="width:62px;text-align:right;font-size:.85rem;flex:none">${eur(x.pr * x.q)}</b>
+    <button class="cd" style="border:0;background:none;font-size:1.1rem;flex:none">🗑</button></div>`;
+  const body = `<div id="clist">${it.map(row).join('')}</div>
+    <div id="ctot" style="margin:10px 0 6px;font-weight:700"></div>
+    <button class="btn ghost" id="ccopy" style="width:100%">Copia lista spesa</button>`;
+  const sel = () => it.filter(x => x.on && x.q > 0);
   openSheet('Carrello riordino', body, { label: 'Apri carrello', save: el => {
-    const g = {}; el.querySelectorAll('.cq').forEach(q => { const n = Math.floor(+q.value || 0), x = it[+q.dataset.i]; if (n > 0) (g[x.o] = g[x.o] || []).push(x.id + ':' + n); });
+    const g = {}; sel().forEach(x => (g[x.o] = g[x.o] || []).push(x.id + ':' + x.q));
     const urls = Object.entries(g).map(([o, l]) => o + '/cart/' + l.join(','));
-    if (!urls.length) { toast('Quantità 0'); return false; }
+    if (!urls.length) { toast('Nessuna bobina selezionata'); return false; }
     urls.forEach((u, i) => setTimeout(() => openUrl(u), i * 1500));
+  }, init: el => {
+    const upd = () => {
+      el.querySelectorAll('.crow').forEach(r => { const x = it[+r.dataset.i]; r.classList.toggle('off', !x.on); r.style.opacity = x.on ? 1 : .45; r.querySelector('.cn').textContent = x.q; r.querySelector('.ct').textContent = eur(x.pr * x.q); r.querySelector('.cc').checked = x.on; });
+      const n = sel().reduce((a, x) => a + x.q, 0), t = sel().reduce((a, x) => a + x.q * x.pr, 0);
+      $('#ctot', el).textContent = `Totale stimato: ${eur(t)} · ${n} bobine`;
+      const ok = el.querySelector('[data-s=ok]'); ok.textContent = `Apri carrello (${n})`;
+    };
+    el.addEventListener('click', e => {
+      const r = e.target.closest('.crow'); if (!r) { if (e.target.id === 'ccopy') share('Lista spesa:\n' + sel().map(x => `- ${x.q}x ${fname(x.f)}`).join('\n') + `\nTotale: ${eur(sel().reduce((a, x) => a + x.q * x.pr, 0))}`, 'Lista spesa'); return; }
+      const x = it[+r.dataset.i];
+      if (e.target.closest('.cp')) x.q++;
+      else if (e.target.closest('.cm')) x.q = Math.max(1, x.q - 1);
+      else if (e.target.closest('.cd')) x.on = false;
+      else if (e.target.classList.contains('cc')) x.on = e.target.checked;
+      else return;
+      upd();
+    });
+    upd();
   } });
 }
 let PRB = false;
@@ -319,10 +366,10 @@ const STATI = { sigillata: '🔒 Sigillata', drybox: '📦 Dry Box', essicca: '�
 function viewMag() {
   const all = list('filaments');
   const out = f => tot(f) <= 0, low = f => !out(f) && f.residuo < S.settings.soglia;
-  const nOut = all.filter(f => out(f) || f.riordina).length;
+  const nOut = all.filter(needRe).length;
   const q = V.q.toLowerCase();
   let rows = all.filter(f => (!q || (fname(f) + ' ' + f.note + ' ' + (f.barcode || '')).toLowerCase().includes(q)) && ({
-    all: () => true, stock: () => !out(f), low: () => low(f), out: () => out(f) || f.riordina, new: () => f.nuove > 0, used: () => f.usate > 0, dry: () => f.stato === 'essicca' || f.stato === 'drybox',
+    all: () => true, stock: () => !out(f), low: () => low(f), out: () => needRe(f), new: () => f.nuove > 0, used: () => f.usate > 0, dry: () => f.stato === 'essicca' || f.stato === 'drybox',
   })[V.flt]());
   rows.sort((a, b) => (out(a) - out(b)) || fname(a).localeCompare(fname(b)));
   return `<div class="stats">
@@ -342,7 +389,7 @@ function filCard(f) {
   return `<div class="card" data-id="${f.id}" data-c="f">
     <div class="crow1"><div class="sw" style="background:${esc(f.hex || '#ccc')}"></div>
       <div class="ti"><div class="small">${f.brand ? `<a class="lk has" data-a="brand" data-id="${f.id}">${esc(f.brand)}</a>` : '<a class="lk" data-a="edit" data-id="' + f.id + '">marca?</a>'} ${typeBadge(f)}
-        ${isOut ? '<span class="badge b-red">Esaurito</span>' : ''}${f.riordina && !isOut ? '<span class="badge b-amb">Riordina</span>' : ''}${isLow ? '<span class="badge b-amb">Basso</span>' : ''}${STATI[f.stato] ? `<span class="badge b-gy">${STATI[f.stato]}</span>` : ''}</div>
+        ${isOut ? '<span class="badge b-red">Esaurito</span>' : ''}${needRe(f) && !isOut ? '<span class="badge b-amb">Riordina</span>' : ''}${isLow ? '<span class="badge b-amb">Basso</span>' : ''}${STATI[f.stato] ? `<span class="badge b-gy">${STATI[f.stato]}</span>` : ''}</div>
         <div class="name"><a class="lk ${f.url ? 'has' : ''}" data-a="link" data-id="${f.id}" title="${f.url ? 'Apri link prodotto' : 'Cerca sul sito'}">${esc(f.color)} ${f.url ? '↗' : '🔍'}</a></div></div>
       <div class="money">${f.costo > 0 ? eur(f.costo) : '<span class="small">costo?</span>'}<small>bobina${f.pagg && f.auto !== 0 ? ' · dal sito' : ''}</small></div></div>
     <div class="bar ${isLow || isOut ? 'low' : ''}"><i style="width:${pct}%"></i></div>
@@ -511,7 +558,8 @@ function filSheet(f, pre) {
     ${f.pagg ? `<p class="hint" style="margin:0 0 10px">Prezzo letto dal sito il ${new Date(f.pagg).toLocaleDateString('it-IT')}${f.pvar ? ' (variante: ' + esc(f.pvar) + ')' : ''}</p>` : '<div style="height:8px"></div>'}
     <div class="f"><label>Codice a barre / QR</label><div class="row" style="flex-wrap:nowrap"><input id="fbc" class="inp" type="text" ${OF} value="${esc(f.barcode || '')}" placeholder="scansiona o scrivi"><button class="btn sm" type="button" id="fscan">📷</button></div></div>
     <div class="f"><label>Note</label><input id="fno" type="text" ${OF} value="${esc(f.note)}"></div>
-    <label class="row" style="font-size:.9rem;font-weight:600"><input id="fri" type="checkbox" ${f.riordina ? 'checked' : ''}> Da riordinare</label>`;
+    <label class="row" style="font-size:.9rem;font-weight:600"><input id="fri" type="checkbox" ${f.riordina ? 'checked' : ''}> Forza riordino</label>
+    <label class="row" style="font-size:.9rem;font-weight:600"><input id="fig" type="checkbox" ${f.ignora ? 'checked' : ''}> Ignora riordino (colore raro)</label>`;
   openSheet(isNew ? 'Nuova bobina' : 'Modifica bobina', body, {
     del: isNew ? null : () => { f.d = 1; touch('filaments', f); render(); toast('Bobina eliminata'); },
     init: el => {
@@ -551,7 +599,7 @@ function filSheet(f, pre) {
         brand: $('#fb', el).value.trim(), type: $('#ft', el).value.trim(), color, hex: $('#fh', el).value, url: nu,
         nuove: Math.max(0, Math.round(num($('#fn', el).value))), usate: Math.max(0, Math.round(num($('#fus', el).value))),
         peso: num($('#fp', el).value) || 1000, residuo: Math.max(0, num($('#fr', el).value)), costo: num($('#fk', el).value),
-        note: $('#fno', el).value.trim(), riordina: $('#fri', el).checked ? 1 : 0, stato, barcode: $('#fbc', el).value.trim(), auto: $('#fau', el).checked ? 1 : 0,
+        note: $('#fno', el).value.trim(), riordina: $('#fri', el).checked ? 1 : 0, ignora: $('#fig', el).checked ? 1 : 0, stato, barcode: $('#fbc', el).value.trim(), auto: $('#fau', el).checked ? 1 : 0,
       });
       if (isNew) S.filaments.push(f); touch('filaments', f); render();
       if (isSunlu(f) && f.auto !== 0 && !f.url) refreshPrices(true);
@@ -656,7 +704,8 @@ function viewSet() {
     <p class="hint" id="kwhinfo" style="margin:-2px 0 10px">= ${eur(kwhP)} per kWh</p>
     ${srow('fallimento', 'Fallimento stampe %', 'aggiunto al costo')}${srow('purge', 'Spreco cambio colore %', 'solo con più colori (spurgo)')}
     ${srow('manoOra', 'Manodopera €/ora', 'per la lavorazione manuale')}${srow('ricarico', 'Ricarico prezzo consigliato ×', 'costo × ricarico')}
-    ${srow('costoKg', 'Costo di riserva €/kg', 'se la bobina non ha un costo')}${srow('soglia', 'Soglia scorta bassa (g)', 'sotto = badge "Basso"')}</div>
+    ${srow('costoKg', 'Costo di riserva €/kg', 'se la bobina non ha un costo')}${srow('soglia', 'Soglia scorta bassa (g)', 'sotto = badge "Basso"')}
+    ${srow('sogliaNuove', 'Riordina se bobine nuove sotto', '0 = disattivo (es. 1)')}${srow('sogliaGr', 'Riordina se grammi totali sotto', '0 = disattivo (es. 500)')}</div>
   <div class="panel"><h3>Cloud condiviso</h3>
     <p class="hint" style="margin:0 0 10px">Stesso archivio su tutti i dispositivi. Senza cloud l'app funziona solo in locale.</p>
     <div class="f"><label>URL database (Supabase o Firebase)</label><input class="inp" id="c_url" type="text" ${OF} placeholder="https://xxxx.supabase.co" value="${esc(c.url)}"></div>
@@ -675,7 +724,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v2.0</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v2.1</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
@@ -863,7 +912,7 @@ document.addEventListener('click', e => {
     if (act === 'copysql') { share(SB_SQL, 'Script Supabase'); return; }
     if (act === 'copyrules') { share(RULES, 'Regole Firebase'); return; }
     if (act === 'cart') { cartSheet(); return; }
-    if (act === 'copyreorder') { share('Da riordinare:\n' + list('filaments').filter(f => tot(f) <= 0 || f.riordina).map(f => '- ' + fname(f)).join('\n'), 'Lista riordino'); return; }
+    if (act === 'copyreorder') { share('Da riordinare:\n' + list('filaments').filter(needRe).map(f => '- ' + fname(f)).join('\n'), 'Lista riordino'); return; }
     if (act === 'export') { exportData(); return; }
     if (act === 'import') { $('#impf').click(); return; }
     if (act === 'wipe') {
