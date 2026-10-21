@@ -492,7 +492,7 @@ async function fb(path, opt = {}) {
   return r.json();
 }
 async function sb(q, opt = {}) {
-  const c = cfg(), r = await fetch(c.url + '/rest/v1/spoolio' + q, { ...opt, headers: { apikey: c.key, Authorization: 'Bearer ' + c.key, 'x-code': c.code, 'Content-Type': 'application/json', ...(opt.headers || {}) } });
+  const c = cfg(), r = await fetch(c.url + '/rest/v1/spoolio' + q, { ...opt, headers: { apikey: c.key, ...(c.key.startsWith('eyJ') ? { Authorization: 'Bearer ' + c.key } : {}), 'x-code': c.code, 'Content-Type': 'application/json', ...(opt.headers || {}) } });
   if (!r.ok) throw new Error('HTTP ' + r.status);
   const t = await r.text(); return t ? JSON.parse(t) : null;
 }
