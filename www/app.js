@@ -32,6 +32,7 @@ const TYPES = ['PLA', 'PLA+', 'PLA Matte', 'PLA Silk', 'PLA Basic', 'PLA Marble'
 let S = jget(KEY, null);
 if (!S || !S.filaments) S = seedState();
 S.settings = { ...DEF_SETTINGS, ...S.settings };
+S.queue = S.queue || [];
 S.meta = { dirty: {}, photoDirty: {}, pushedAll: 0, ...S.meta };
 if (!S.meta.mig2) { // migrazione unica: marca Sunlu e costo 12,99 sulle bobine gia' presenti
   S.meta.mig2 = 1;
@@ -359,9 +360,9 @@ addEventListener('popstate', () => { if (skipPop) { skipPop = false; return; } r
 function render() {
   clearAC(); document.documentElement.style.setProperty('--hh', $('#top').offsetHeight + 'px');
   $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === V.tab));
-  $('#fab').style.display = (V.tab === 'mag' || V.tab === 'print') ? 'grid' : 'none';
+  $('#fab').style.display = (V.tab === 'mag' || V.tab === 'print' || V.tab === 'queue') ? 'grid' : 'none';
   const v = $('#view');
-  v.innerHTML = { mag: viewMag, print: viewPrint, calc: viewCalc, set: viewSet }[V.tab]();
+  v.innerHTML = { mag: viewMag, print: viewPrint, queue: viewQueue, calc: viewCalc, set: viewSet }[V.tab]();
   ({ calc: bindCalc, set: bindSet }[V.tab] || (() => { }))();
   setDot();
 }
@@ -481,8 +482,9 @@ function viewCalc() {
   <div class="panel"><h3>Dettaglio costi</h3><table class="dt" id="cbreak"></table></div>
   <button class="btn primary" style="width:100%" data-a="saveprint">Salva come stampa</button>`;
 }
-function rowHtml(r) {
-  return `<div class="crow"><input class="inp cname" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Marca / colore" value="${esc(r.name)}" data-fid="${esc(r.fid || '')}"><input class="inp cg" type="number" min="0" step="any" inputmode="decimal" ${OF} placeholder="grammi" value="${esc(r.g)}"><button data-a="delrow" tabindex="-1">✕</button></div>`;
+function rowHtml(r, t) {
+  const tm = t || r.t ? `<div class="ctm"><span>⏱ tempo</span><input class="inp cth" type="number" min="0" step="1" inputmode="numeric" ${OF} placeholder="ore" value="${r.mm ? Math.floor(r.mm / 60) || '' : ''}"><input class="inp ctmn" type="number" min="0" max="59" step="1" inputmode="numeric" ${OF} placeholder="min" value="${r.mm ? r.mm % 60 || '' : ''}"></div>` : '';
+  return `<div class="crow${tm ? ' wt' : ''}"><input class="inp cname" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Marca / colore" value="${esc(r.name)}" data-fid="${esc(r.fid || '')}"><input class="inp cg" type="number" min="0" step="any" inputmode="decimal" ${OF} placeholder="grammi" value="${esc(r.g)}"><button data-a="delrow" tabindex="-1">✕</button>${tm}</div>`;
 }
 function bindRows(root, onChange) {
   $$('.crow', root).forEach(row => {
@@ -496,7 +498,7 @@ function bindRows(root, onChange) {
     });
   });
 }
-const readRows = root => $$('.crow', root).map(r => ({ fid: $('.cname', r).dataset.fid || '', name: $('.cname', r).value.trim(), g: $('.cg', r).value }));
+const readRows = root => $$('.crow', root).map(r => ({ fid: $('.cname', r).dataset.fid || '', name: $('.cname', r).value.trim(), g: $('.cg', r).value, mm: $('.cth', r) ? num($('.cth', r).value) * 60 + num($('.ctmn', r).value) : 0 }));
 function breakHtml(r) {
   const row = (l, v) => `<tr><td>${l}</td><td>${eur(v)}</td></tr>`, st = S.settings;
   return `<tr><th>Voce</th><th>Costo</th></tr>${row('Filamento', r.mat)}${r.purge > 0 ? row(`Spreco cambio colore (${st.purge}%)`, r.purge) : ''}${row(`Energia (${eur(r.kwhP)}/kWh · ${r.pr.watt} W)`, r.en)}${row('Usura ' + esc(r.pr.nome), r.us)}${row(`Rischio fallimento (${st.fallimento}%)`, r.fail)}${r.lav > 0 ? row('Lavorazione manuale', r.lav) : ''}${r.extra > 0 ? row('Accessori extra', r.extra) : ''}<tr class="tot"><td>Totale</td><td>${eur(r.tot)}</td></tr>${row(`Prezzo consigliato (×${st.ricarico})`, r.price)}`;
@@ -656,7 +658,7 @@ function printSheet(p, isNew) {
   isNew = isNew || !p; p = p || { id: uid(), nome: '', prezzo: 0, scorta: 0, minuti: 0, colori: [], note: '', foto: 0, fu: 0 };
   if (!p.id) p = { ...p, id: uid() };
   let photo = (PHOTOS[p.id] && PHOTOS[p.id].data) || null, photoChanged = false, pid = p.pid || '';
-  const rows = (p.colori && p.colori.length ? p.colori : [{ fid: '', nome: '', g: '' }]).map(c => ({ fid: c.fid, name: c.nome, g: c.g || '' }));
+  const rows = (p.colori && p.colori.length ? p.colori : [{ fid: '', nome: '', g: '' }]).map(c => ({ fid: c.fid, name: c.nome, g: c.g || '', mm: c.m || 0, t: 1 }));
   const body = `<div id="pph"></div>
     <div class="f"><label>Nome oggetto</label><input id="pn" type="text" ${OF} value="${esc(p.nome)}" placeholder="es. Snoopy"></div>
     <div class="g2"><div class="f"><label>Prezzo vendita €</label><input id="pp" type="number" min="0" step="any" inputmode="decimal" ${OF} value="${p.prezzo || ''}"></div>
@@ -664,7 +666,7 @@ function printSheet(p, isNew) {
     <div class="g2"><div class="f"><label>Ore stampa</label><input id="ph" type="number" min="0" step="1" inputmode="numeric" ${OF} value="${Math.floor((p.minuti || 0) / 60) || ''}"></div>
     <div class="f"><label>Minuti</label><input id="pm" type="number" min="0" max="59" step="1" inputmode="numeric" ${OF} value="${(p.minuti || 0) % 60 || ''}"></div></div>
     <div id="ppr">${prChips(pid, 'data-pp')}</div>
-    <div class="lab" style="margin:8px 0 4px">Colori usati (dal magazzino) e grammi</div><div id="crows">${rows.map(rowHtml).join('')}</div>
+    <div class="lab" style="margin:8px 0 4px">Colori usati (dal magazzino) e grammi</div><div id="crows">${rows.map(r => rowHtml(r, 1)).join('')}</div>
     <button class="btn sm" type="button" id="padd" style="margin-bottom:10px">+ Colore</button>
     <div class="g2"><div class="f"><label>Accessori extra €</label><input id="pex" type="number" min="0" step="any" inputmode="decimal" ${OF} value="${p.extra || ''}"></div>
     <div class="f"><label>Lavorazione (min)</label><input id="plv" type="number" min="0" step="1" inputmode="numeric" ${OF} value="${p.lav || ''}"></div></div>
@@ -685,8 +687,11 @@ function printSheet(p, isNew) {
         $('#pgain', el).innerHTML = `Margine sul prezzo inserito: <b class="${gain >= 0 ? 'pos' : 'neg'}">${eur(gain)}</b>${c.est ? ' (costo filamento stimato)' : ''}`;
       };
       bindRows(el, upd); upd();
-      el.addEventListener('input', e => { if (e.target.matches('#ph,#pm,#pp,#pex,#plv,.cg')) upd(); });
-      $('#padd', el).onclick = () => { $('#crows', el).insertAdjacentHTML('beforeend', rowHtml({ fid: '', name: '', g: '' })); bindRows(el, upd); $$('.cname', el).pop().focus(); };
+      el.addEventListener('input', e => {
+        if (e.target.matches('.cth,.ctmn')) { const t = readRows($('#crows', el)).reduce((a, r) => a + r.mm, 0); if (t > 0) { $('#ph', el).value = Math.floor(t / 60) || ''; $('#pm', el).value = t % 60 || ''; } }
+        if (e.target.matches('#ph,#pm,#pp,#pex,#plv,.cg,.cth,.ctmn')) upd();
+      });
+      $('#padd', el).onclick = () => { $('#crows', el).insertAdjacentHTML('beforeend', rowHtml({ fid: '', name: '', g: '' }, 1)); bindRows(el, upd); $$('.cname', el).pop().focus(); };
       el.addEventListener('click', e => {
         const b = e.target.closest('[data-a=delrow]'); if (b) { if ($$('.crow', el).length > 1) b.closest('.crow').remove(); else { $('.cname', el).value = ''; $('.cname', el).dataset.fid = ''; $('.cg', el).value = ''; } upd(); }
         const pc = e.target.closest('[data-pp]'); if (pc) { pid = pc.dataset.pp; $('#ppr', el).innerHTML = prChips(pid, 'data-pp'); upd(); }
@@ -700,7 +705,7 @@ function printSheet(p, isNew) {
         nome, prezzo: num($('#pp', el).value), scorta: Math.max(0, Math.round(num($('#ps', el).value))),
         minuti: Math.round(num($('#ph', el).value) * 60 + num($('#pm', el).value)), note: $('#pno', el).value.trim(), pid,
         extra: num($('#pex', el).value), lav: num($('#plv', el).value), file: $('#pfl', el).value.trim(),
-        colori: readRows($('#crows', el)).filter(r => r.name || num(r.g) > 0).map(r => ({ fid: r.fid, nome: r.name || (fil(r.fid) ? fname(fil(r.fid)) : ''), g: num(r.g) })),
+        colori: readRows($('#crows', el)).filter(r => r.name || num(r.g) > 0 || r.mm > 0).map(r => ({ fid: r.fid, nome: r.name || (fil(r.fid) ? fname(fil(r.fid)) : ''), g: num(r.g), m: r.mm || 0 })),
       });
       if (photoChanged) {
         p.fu = Date.now(); p.foto = photo ? 1 : 0;
@@ -711,6 +716,37 @@ function printSheet(p, isNew) {
       touch('prints', p); render();
     },
   });
+}
+
+/* ---------- coda di stampa ---------- */
+function viewQueue() {
+  const all = list('queue'), isDone = q => q.pl.every(Boolean);
+  const todo = all.filter(q => !isDone(q)), done = all.filter(isDone);
+  const miss = todo.reduce((a, q) => a + q.pl.filter(x => !x).length, 0);
+  const item = q => {
+    const n = q.pl.filter(Boolean).length, dn = isDone(q);
+    return `<div class="qi${dn ? ' dn' : ''}"><div class="qh"><input type="checkbox" class="qc" data-a="qall" data-id="${q.id}" ${dn ? 'checked' : ''}>
+      <div class="qn">${esc(q.nome)}<small>${n}/${q.pl.length} piatti</small></div>
+      <div class="qs"><button data-a="qn" data-id="${q.id}" data-d="-1">−</button><button data-a="qn" data-id="${q.id}" data-d="1">+</button><button data-a="qdel" data-id="${q.id}" aria-label="Elimina">🗑</button></div></div>
+      <div class="qp">${q.pl.map((x, i) => `<label class="${x ? 'on' : ''}"><input type="checkbox" data-a="qpl" data-id="${q.id}" data-i="${i}" ${x ? 'checked' : ''}>Piatto ${i + 1}</label>`).join('')}</div></div>`;
+  };
+  return `<div class="stats" style="grid-template-columns:repeat(2,1fr)"><div class="stat"><b>${todo.length}</b><span>Da stampare</span></div><div class="stat"><b>${miss}</b><span>Piatti mancanti</span></div></div>
+  <div class="list">${todo.map(item).join('') || '<div class="empty">Coda vuota. Tocca + per aggiungere cosa stampare.</div>'}</div>
+  ${done.length ? `<div class="lab" style="margin:14px 0 6px;display:flex;justify-content:space-between;align-items:center">Completati<button class="chip" data-a="qclear">Rimuovi completati</button></div><div class="list">${done.map(item).join('')}</div>` : ''}`;
+}
+function queueSheet() {
+  let pid = '';
+  const body = `<div class="f"><label>Cosa stampare (cerca tra le salvate o scrivi nuovo)</label><input id="qnm" type="text" ${OF} autocomplete="off" placeholder="es. Snoopy"></div>
+    <div class="f"><label>Numero di piatti</label><input id="qpn" type="number" min="1" step="1" inputmode="numeric" ${OF} value="1"></div>`;
+  openSheet('Aggiungi in coda', body, { label: 'Aggiungi', init: el => {
+    const inp = $('#qnm', el);
+    attachAC(inp, q => list('prints').filter(p => !q || p.nome.toLowerCase().includes(q.toLowerCase())).sort((a, b) => a.nome.localeCompare(b.nome)).map(p => ({ label: p.nome, p })), it => { inp.value = it.label; pid = it.p.id; $('#qpn', el).focus(); });
+    inp.addEventListener('input', () => { pid = ''; });
+  }, save: el => {
+    const nome = $('#qnm', el).value.trim(); if (!nome) { toast('Scrivi cosa stampare'); return false; }
+    const n = Math.max(1, Math.min(50, Math.round(num($('#qpn', el).value) || 1)));
+    const q = { id: uid(), nome, pid, pl: Array(n).fill(0) }; S.queue.push(q); touch('queue', q); render();
+  } });
 }
 
 /* ---------- impostazioni ---------- */
@@ -758,7 +794,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v2.4</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v2.5</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
@@ -810,7 +846,7 @@ function exportCsv(kind) {
   shareFile(new File([toCsv(rows)], kind === 'f' ? 'spoolio-bobine.csv' : 'spoolio-stampe.csv', { type: 'text/csv' }), 'Export Spoolio');
 }
 async function exportData() {
-  const data = JSON.stringify({ v: 1, filaments: list('filaments'), prints: list('prints'), settings: S.settings, photos: PHOTOS }, null, 1);
+  const data = JSON.stringify({ v: 1, filaments: list('filaments'), prints: list('prints'), queue: list('queue'), settings: S.settings, photos: PHOTOS }, null, 1);
   const file = new File([data], 'spoolio-backup.json', { type: 'application/json' });
   try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Backup Spoolio' }); return; } } catch (e) { if (e.name === 'AbortError') return; }
   const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; a.click(); toast('Backup scaricato');
@@ -819,7 +855,7 @@ async function importFile(f) {
   if (!f) return;
   try {
     const o = JSON.parse(await f.text()); let n = 0;
-    for (const c of ['filaments', 'prints']) for (const r of o[c] || []) { const i = S[c].findIndex(x => x.id === r.id); if (i >= 0) S[c][i] = r; else S[c].push(r); touch(c, r); n++; }
+    for (const c of ['filaments', 'prints', 'queue']) for (const r of o[c] || []) { const i = S[c].findIndex(x => x.id === r.id); if (i >= 0) S[c][i] = r; else S[c].push(r); touch(c, r); n++; }
     if (o.photos) { PHOTOS = { ...PHOTOS, ...o.photos }; jset(PH, PHOTOS); }
     if (o.settings) { S.settings = { ...S.settings, ...o.settings }; touch('settings', S.settings); }
     render(); toast(n + ' elementi importati');
@@ -866,14 +902,14 @@ async function syncNow(manual) {
   if (SY.busy) return; SY.busy = true; SY.state = 'busy'; setDot();
   try {
     const remote = {};
-    for (const c of ['filaments', 'prints', 'settings']) remote[c] = await bGet(c);
+    for (const c of ['filaments', 'prints', 'queue', 'settings']) remote[c] = await bGet(c);
     if (!S.meta.pushedAll && !Object.keys(remote.filaments).length && !Object.keys(remote.prints).length && !Object.keys(remote.settings).length) {
-      S.filaments.forEach(r => S.meta.dirty['filaments:' + r.id] = 1); S.prints.forEach(r => S.meta.dirty['prints:' + r.id] = 1); S.meta.dirty['settings:main'] = 1;
+      S.filaments.forEach(r => S.meta.dirty['filaments:' + r.id] = 1); S.prints.forEach(r => S.meta.dirty['prints:' + r.id] = 1); S.queue.forEach(r => S.meta.dirty['queue:' + r.id] = 1); S.meta.dirty['settings:main'] = 1;
     }
     S.meta.pushedAll = 1;
     let changed = false;
-    for (const c of ['filaments', 'prints']) for (const id in remote[c]) {
-      const r = remote[c][id]; if (!r || !r.id) continue; r.colori = r.colori || [];
+    for (const c of ['filaments', 'prints', 'queue']) for (const id in remote[c]) {
+      const r = remote[c][id]; if (!r || !r.id) continue; r.colori = r.colori || []; if (c === 'queue') r.pl = r.pl || [0];
       const i = S[c].findIndex(x => x.id === id);
       if (i < 0) { S[c].push(r); changed = true; } else if ((r.u || 0) > (S[c][i].u || 0)) { S[c][i] = r; delete S.meta.dirty[c + ':' + id]; changed = true; }
     }
@@ -938,7 +974,12 @@ document.addEventListener('click', e => {
     if (act === 'n') { e.stopPropagation(); stepFil(id, a.dataset.k, +a.dataset.d); return; }
     if (act === 'pn') { e.stopPropagation(); stepPrint(id, +a.dataset.d); return; }
     if (act === 'flt') { V.flt = (a.dataset.t && V.flt === a.dataset.k) ? 'all' : a.dataset.k; render(); return; }
-    if (act === 'add') { V.tab === 'print' ? printSheet() : filSheet(); return; }
+    if (act === 'add') { V.tab === 'print' ? printSheet() : V.tab === 'queue' ? queueSheet() : filSheet(); return; }
+    if (act === 'qpl') { const q = S.queue.find(x => x.id === id); if (q) { q.pl[+a.dataset.i] = q.pl[+a.dataset.i] ? 0 : 1; touch('queue', q); render(); } return; }
+    if (act === 'qall') { const q = S.queue.find(x => x.id === id); if (q) { const v = q.pl.every(Boolean) ? 0 : 1; q.pl = q.pl.map(() => v); touch('queue', q); render(); } return; }
+    if (act === 'qn') { const q = S.queue.find(x => x.id === id); if (q) { const d = +a.dataset.d; if (d > 0) q.pl.push(0); else if (q.pl.length > 1) q.pl.pop(); touch('queue', q); render(); } return; }
+    if (act === 'qdel') { const q = S.queue.find(x => x.id === id); if (q) { q.d = 1; touch('queue', q); render(); } return; }
+    if (act === 'qclear') { list('queue').filter(q => q.pl.every(Boolean)).forEach(q => { q.d = 1; touch('queue', q); }); render(); return; }
     if (act === 'sync') { if (!cfgOK()) { V.tab = 'set'; render(); } else syncNow(true); return; }
     if (act === 'syncnow') { syncNow(true); return; }
     if (act === 'newcode') { $('#c_code').value = randCode(); $('#c_code').dispatchEvent(new Event('change', { bubbles: true })); return; }

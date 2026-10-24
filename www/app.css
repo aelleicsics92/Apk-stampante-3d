@@ -152,3 +152,9 @@ body.kb #app{padding-bottom:46vh}
 body.kbopen #tabs,body.kbopen #fab{display:none}
 
 .sbar{position:sticky;top:calc(var(--hh,64px) - 8px);z-index:15;background:var(--bg);padding:8px 0;display:flex;gap:8px;align-items:center}
+
+.crow.wt{grid-template-columns:1fr 84px 34px}.ctm{grid-column:1/-1;display:flex;gap:6px;align-items:center;font-size:.75rem;color:#6b7280;margin-top:-2px}.ctm .inp{width:70px;padding:7px 8px}
+.qi{background:var(--card);border-radius:var(--r);padding:12px;box-shadow:0 1px 3px rgba(0,0,0,.05);display:grid;gap:10px}.qi.dn{opacity:.55}.qi.dn .qn{text-decoration:line-through}
+.qh{display:flex;align-items:center;gap:10px}.qc,.qp input{width:22px;height:22px;flex:none}.qn{flex:1;font-weight:700;min-width:0}.qn small{display:block;font-weight:500;color:#6b7280;font-size:.75rem}
+.qs{display:flex;gap:6px}.qs button{width:34px;height:34px;border-radius:10px;border:0;background:#f1f5f9;font-size:1rem;font-weight:700}
+.qp{display:flex;flex-wrap:wrap;gap:8px}.qp label{display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:12px;background:#f1f5f9;font-size:.85rem}.qp label.on{background:#d1fae5;color:#065f46}
