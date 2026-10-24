@@ -42,7 +42,7 @@ if (!S.meta.mig2) { // migrazione unica: marca Sunlu e costo 12,99 sulle bobine 
 const ensurePrinters = () => { if (!Array.isArray(S.settings.printers) || !S.settings.printers.length) S.settings.printers = [{ id: 'p1', nome: 'Bambu Lab P2S', watt: S.settings.watt || 150, usuraOra: S.settings.usuraOra ?? 0.25 }]; };
 ensurePrinters();
 let PHOTOS = jget(PH, {});
-let V = { tab: 'mag', q: '', flt: 'all', pq: '', ft: [], fc: [], fb: [] };
+let V = { tab: 'mag', q: '', flt: 'all', sort: 'nome', pq: '', ft: [], fc: [], fb: [] };
 const save = () => jset(KEY, S);
 const list = c => S[c].filter(x => !x.d);
 const fil = id => S.filaments.find(f => f.id === id && !f.d);
@@ -400,26 +400,32 @@ function filtSheet() {
 }
 function viewMag() {
   const all = list('filaments');
-  const out = f => tot(f) <= 0, low = f => !out(f) && f.residuo < S.settings.soglia;
+  const out = f => tot(f) <= 0, low = f => !out(f) && (f.residuo < S.settings.soglia || needRe(f));
   const nOut = all.filter(needRe).length;
   const q = V.q.toLowerCase();
   let rows = all.filter(f => (!q || (fname(f) + ' ' + f.note + ' ' + (f.barcode || '')).toLowerCase().includes(q)) && (!V.ft.length || V.ft.includes(f.type)) && (!V.fb.length || V.fb.includes(f.brand)) && (!V.fc.length || V.fc.includes(colFam(f.hex))) && ({
-    all: () => true, stock: () => !out(f), low: () => low(f), out: () => needRe(f), new: () => f.nuove > 0, used: () => f.usate > 0, dry: () => f.stato === 'essicca' || f.stato === 'drybox',
+    all: () => true, stock: () => !out(f), low: () => low(f), done: () => out(f), out: () => needRe(f), new: () => f.nuove > 0, used: () => f.usate > 0, dry: () => f.stato === 'essicca' || f.stato === 'drybox',
   })[V.flt]());
-  rows.sort((a, b) => (out(a) - out(b)) || fname(a).localeCompare(fname(b)));
+  const nm = (a, b) => fname(a).localeCompare(fname(b)), cf = f => COLF.findIndex(c => c[0] === colFam(f.hex));
+  const SORTS = { nome: (a, b) => (out(a) - out(b)) || nm(a, b), marca: (a, b) => (a.brand || '').localeCompare(b.brand || '') || nm(a, b), tipo: (a, b) => (a.type || '').localeCompare(b.type || '') || nm(a, b),
+    colore: (a, b) => cf(a) - cf(b) || nm(a, b), qd: (a, b) => tot(b) - tot(a) || nm(a, b), qa: (a, b) => tot(a) - tot(b) || nm(a, b),
+    gd: (a, b) => gTot(b) - gTot(a) || nm(a, b), ga: (a, b) => gTot(a) - gTot(b) || nm(a, b), pd: (a, b) => (b.costo || 0) - (a.costo || 0) || nm(a, b), pa: (a, b) => (a.costo || 0) - (b.costo || 0) || nm(a, b) };
+  rows.sort(SORTS[V.sort] || SORTS.nome);
+  const SL = { nome: 'Nome', marca: 'Marca', tipo: 'Tipo', colore: 'Colore', qd: 'Bobine: più prima', qa: 'Bobine: meno prima', gd: 'Grammi: più prima', ga: 'Grammi: meno prima', pd: 'Prezzo: alto prima', pa: 'Prezzo: basso prima' };
   return `<div class="stats">
     <button class="stat ${V.flt === 'stock' ? 'on' : ''}" data-a="flt" data-t="1" data-k="stock"><b>${all.filter(f => !out(f)).length}</b><span>Tipi</span></button>
     <button class="stat ${V.flt === 'new' ? 'on' : ''}" data-a="flt" data-t="1" data-k="new"><b>${all.reduce((a, f) => a + (f.nuove || 0), 0)}</b><span>Nuove</span></button>
     <button class="stat ${V.flt === 'used' ? 'on' : ''}" data-a="flt" data-t="1" data-k="used"><b>${all.reduce((a, f) => a + (f.usate || 0), 0)}</b><span>Usate</span></button>
     <button class="stat ${nOut ? 'warn' : ''} ${V.flt === 'out' ? 'on' : ''}" data-a="flt" data-t="1" data-k="out"><b>${nOut}</b><span>Riordina</span></button></div>
   <div class="sbar"><input class="search" id="q" type="text" ${OF} placeholder="Cerca marca, tipo, colore o codice" value="${esc(V.q)}" style="flex:1;min-width:0"><button data-a="cart" aria-label="Carrello riordino" style="position:relative;flex:none;width:46px;height:46px;border-radius:14px;border:1px solid #d1fae5;background:#ecfdf5;font-size:1.25rem">🛒${nOut ? `<span style="position:absolute;top:-6px;right:-6px;min-width:19px;height:19px;border-radius:10px;background:#059669;color:#fff;font-size:.7rem;font-weight:700;line-height:19px;text-align:center;padding:0 4px">${nOut}</span>` : ''}</button></div>
-  <div class="chips">${[['all', 'Tutti'], ['stock', 'In scorta'], ['low', 'Bassi'], ['dry', '💧 Essiccazione']].map(([k, l]) => `<button class="chip ${V.flt === k ? 'on' : ''}" data-a="flt" data-k="${k}">${l}</button>`).join('')}
-    <button class="chip ${nFilt() ? 'on' : ''}" data-a="filt">⚙ Filtri${nFilt() ? ' (' + nFilt() + ')' : ''}</button><button class="chip" data-a="scan">📷 Scansiona</button><button class="chip" data-a="prices">↻ Prezzi Sunlu</button>
+  <div class="fbar"><button class="fbtn ${nFilt() ? 'on' : ''}" data-a="filt">⚙ Filtri${nFilt() ? ' (' + nFilt() + ')' : ''}</button><label class="fbtn sel">⇅ ${SL[V.sort] || "Nome"}<select id="fsort" ${OF}>${Object.entries(SL).map(([k, l]) => `<option value="${k}" ${V.sort === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div>
+  <div class="chips">${[['all', 'Tutti'], ['stock', 'In scorta'], ['low', 'Bassi'], ['done', 'Finiti'], ['dry', '💧 Essiccazione']].map(([k, l]) => `<button class="chip ${V.flt === k ? 'on' : ''}" data-a="flt" data-k="${k}">${l}</button>`).join('')}
+    <button class="chip" data-a="scan">📷 Scansiona</button><button class="chip" data-a="prices">↻ Prezzi Sunlu</button>
     ${V.flt === 'out' && rows.length ? '<button class="chip" data-a="copyreorder">Copia lista</button>' : ''}</div>
   <div class="list">${rows.map(filCard).join('') || '<div class="empty">Nessuna bobina. Tocca + per aggiungerne una, oppure collega il cloud in Impostazioni.</div>'}</div>`;
 }
 function filCard(f) {
-  const t = tot(f), isOut = t <= 0, isLow = !isOut && f.residuo < S.settings.soglia;
+  const t = tot(f), isOut = t <= 0, isLow = !isOut && (f.residuo < S.settings.soglia || needRe(f));
   const pct = t > 0 ? Math.min(100, Math.round(100 * f.residuo / (t * (f.peso || 1000)))) : 0;
   return `<div class="card" data-id="${f.id}" data-c="f">
     <div class="crow1"><div class="sw" style="background:${esc(f.hex || '#ccc')}"></div>
@@ -794,7 +800,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v2.5</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v2.6</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
@@ -955,6 +961,7 @@ function stepPrint(id, d) {
     prev.forEach(j => { const o = JSON.parse(j), f = fil(o.id); Object.assign(f, o); touch('filaments', f); }); render();
   });
 }
+document.addEventListener('change', e => { if (e.target.id === 'fsort') { V.sort = e.target.value; render(); } });
 document.addEventListener('click', e => {
   const tab = e.target.closest('#tabs [data-tab]'); if (tab) { V.tab = tab.dataset.tab; render(); scrollTo(0, 0); return; }
   const a = e.target.closest('[data-a]');
