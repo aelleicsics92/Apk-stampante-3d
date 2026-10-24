@@ -41,7 +41,7 @@ if (!S.meta.mig2) { // migrazione unica: marca Sunlu e costo 12,99 sulle bobine 
 const ensurePrinters = () => { if (!Array.isArray(S.settings.printers) || !S.settings.printers.length) S.settings.printers = [{ id: 'p1', nome: 'Bambu Lab P2S', watt: S.settings.watt || 150, usuraOra: S.settings.usuraOra ?? 0.25 }]; };
 ensurePrinters();
 let PHOTOS = jget(PH, {});
-let V = { tab: 'mag', q: '', flt: 'all', pq: '' };
+let V = { tab: 'mag', q: '', flt: 'all', pq: '', ft: [], fc: [], fb: [] };
 const save = () => jset(KEY, S);
 const list = c => S[c].filter(x => !x.d);
 const fil = id => S.filaments.find(f => f.id === id && !f.d);
@@ -373,12 +373,36 @@ const typeBadge = f => {
   return `<span class="badge ${MAT[k] || 'b-gy'}">${esc(f.type)}</span>`;
 };
 const STATI = { sigillata: '🔒 Sigillata', drybox: '📦 Dry Box', essicca: '💧 Da essiccare' };
+const COLF = [['Bianco', '#f5f5f5'], ['Nero', '#111'], ['Grigio', '#888'], ['Rosso', '#e11d2e'], ['Arancione', '#f97316'], ['Giallo', '#facc15'], ['Verde', '#16a34a'], ['Azzurro', '#06b6d4'], ['Blu', '#2563eb'], ['Viola', '#7c3aed'], ['Rosa', '#ec4899'], ['Marrone', '#92400e']];
+function colFam(hx) {
+  if (!/^#?[0-9a-f]{6}$/i.test(hx || '')) return 'Grigio';
+  const [H, S, L] = hex2hsl(hx);
+  if (L > 90) return 'Bianco'; if (L < 14) return 'Nero'; if (S < 14) return L > 75 ? 'Bianco' : L < 25 ? 'Nero' : 'Grigio';
+  if (H < 15 || H >= 345) return L < 38 ? 'Marrone' : 'Rosso';
+  if (H < 40) return L < 55 ? 'Marrone' : 'Arancione';
+  if (H < 70) return 'Giallo'; if (H < 165) return 'Verde'; if (H < 200) return 'Azzurro';
+  if (H < 255) return 'Blu'; if (H < 295) return 'Viola'; return 'Rosa';
+}
+const nFilt = () => V.ft.length + V.fc.length + V.fb.length;
+function filtSheet() {
+  const all = list('filaments'), uniq = a => [...new Set(a.filter(Boolean))].sort((x, y) => x.localeCompare(y));
+  const T = uniq(all.map(f => f.type)), B = uniq(all.map(f => f.brand)), C = COLF.filter(([n]) => all.some(f => colFam(f.hex) === n));
+  const sel = { ft: [...V.ft], fc: [...V.fc], fb: [...V.fb] };
+  const grp = (k, t, items) => items.length ? `<h4 style="margin:12px 0 6px;font-size:.8rem;color:#6b7280;text-transform:uppercase">${t}</h4><div class="chips" style="flex-wrap:wrap">${items.map(([v, dot]) => `<button class="chip ${sel[k].includes(v) ? 'on' : ''}" data-fk="${k}" data-fv="${esc(v)}">${dot ? `<i style="display:inline-block;width:11px;height:11px;border-radius:50%;background:${dot};border:1px solid #0003;margin-right:5px"></i>` : ''}${esc(v)}</button>`).join('')}</div>` : '';
+  openSheet('Filtri', grp('ft', 'Categoria / tipo', T.map(v => [v])) + grp('fc', 'Colore', C.map(([n, c]) => [n, c])) + grp('fb', 'Marca', B.map(v => [v])) + `<button class="btn ghost" id="frs" style="width:100%;margin-top:14px">Azzera filtri</button>`, { label: 'Applica', save: () => { V.ft = sel.ft; V.fc = sel.fc; V.fb = sel.fb; render(); }, init: el => {
+    el.addEventListener('click', e => {
+      const b = e.target.closest('[data-fk]');
+      if (b) { const a = sel[b.dataset.fk], v = b.dataset.fv, i = a.indexOf(v); i < 0 ? a.push(v) : a.splice(i, 1); b.classList.toggle('on'); }
+      else if (e.target.id === 'frs') { sel.ft = []; sel.fc = []; sel.fb = []; el.querySelectorAll('[data-fk]').forEach(x => x.classList.remove('on')); }
+    });
+  } });
+}
 function viewMag() {
   const all = list('filaments');
   const out = f => tot(f) <= 0, low = f => !out(f) && f.residuo < S.settings.soglia;
   const nOut = all.filter(needRe).length;
   const q = V.q.toLowerCase();
-  let rows = all.filter(f => (!q || (fname(f) + ' ' + f.note + ' ' + (f.barcode || '')).toLowerCase().includes(q)) && ({
+  let rows = all.filter(f => (!q || (fname(f) + ' ' + f.note + ' ' + (f.barcode || '')).toLowerCase().includes(q)) && (!V.ft.length || V.ft.includes(f.type)) && (!V.fb.length || V.fb.includes(f.brand)) && (!V.fc.length || V.fc.includes(colFam(f.hex))) && ({
     all: () => true, stock: () => !out(f), low: () => low(f), out: () => needRe(f), new: () => f.nuove > 0, used: () => f.usate > 0, dry: () => f.stato === 'essicca' || f.stato === 'drybox',
   })[V.flt]());
   rows.sort((a, b) => (out(a) - out(b)) || fname(a).localeCompare(fname(b)));
@@ -389,7 +413,7 @@ function viewMag() {
     <button class="stat ${nOut ? 'warn' : ''} ${V.flt === 'out' ? 'on' : ''}" data-a="flt" data-t="1" data-k="out"><b>${nOut}</b><span>Riordina</span></button></div>
   <div class="sbar"><input class="search" id="q" type="text" ${OF} placeholder="Cerca marca, tipo, colore o codice" value="${esc(V.q)}" style="flex:1;min-width:0"><button data-a="cart" aria-label="Carrello riordino" style="position:relative;flex:none;width:46px;height:46px;border-radius:14px;border:1px solid #d1fae5;background:#ecfdf5;font-size:1.25rem">🛒${nOut ? `<span style="position:absolute;top:-6px;right:-6px;min-width:19px;height:19px;border-radius:10px;background:#059669;color:#fff;font-size:.7rem;font-weight:700;line-height:19px;text-align:center;padding:0 4px">${nOut}</span>` : ''}</button></div>
   <div class="chips">${[['all', 'Tutti'], ['stock', 'In scorta'], ['low', 'Bassi'], ['dry', '💧 Essiccazione']].map(([k, l]) => `<button class="chip ${V.flt === k ? 'on' : ''}" data-a="flt" data-k="${k}">${l}</button>`).join('')}
-    <button class="chip" data-a="scan">📷 Scansiona</button><button class="chip" data-a="prices">↻ Prezzi Sunlu</button>
+    <button class="chip ${nFilt() ? 'on' : ''}" data-a="filt">⚙ Filtri${nFilt() ? ' (' + nFilt() + ')' : ''}</button><button class="chip" data-a="scan">📷 Scansiona</button><button class="chip" data-a="prices">↻ Prezzi Sunlu</button>
     ${V.flt === 'out' && rows.length ? '<button class="chip" data-a="copyreorder">Copia lista</button>' : ''}</div>
   <div class="list">${rows.map(filCard).join('') || '<div class="empty">Nessuna bobina. Tocca + per aggiungerne una, oppure collega il cloud in Impostazioni.</div>'}</div>`;
 }
@@ -734,7 +758,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v2.3</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v2.4</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
@@ -921,6 +945,7 @@ document.addEventListener('click', e => {
     if (act === 'sharelink') { const c = cfg(); if (!cfgOK()) { toast('Prima inserisci URL e codice'); return; } share('spoolio:' + btoa(JSON.stringify({ u: c.url, c: c.code, k: c.key || '' })), 'Collegamento Spoolio'); return; }
     if (act === 'copysql') { share(SB_SQL, 'Script Supabase'); return; }
     if (act === 'copyrules') { share(RULES, 'Regole Firebase'); return; }
+    if (act === 'filt') { filtSheet(); return; }
     if (act === 'cart') { cartSheet(); return; }
     if (act === 'copyreorder') { share('Da riordinare:\n' + list('filaments').filter(needRe).map(f => '- ' + fname(f)).join('\n'), 'Lista riordino'); return; }
     if (act === 'export') { exportData(); return; }
