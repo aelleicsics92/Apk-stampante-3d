@@ -502,7 +502,7 @@ function printCard(p) {
   const ph = PHOTOS[p.id] && PHOTOS[p.id].data;
   return `<div class="card" data-id="${p.id}" data-c="p">
     <div class="crow1">${ph ? `<img class="thumb" src="${ph}" alt="">` : '<div class="thumb">🧸</div>'}
-      <div class="ti"><div class="name">${esc(p.nome)}</div><div class="small">${p.minuti ? '⏱ ' + fmtT(p.minuti) : ''}${p.minuti && g ? ' · ' : ''}${g ? '⚖ ' + Math.round(g) + ' g' : ''}${!has ? 'ore e grammi da inserire' : ''}</div></div>
+      <div class="ti"><div class="name">${esc(p.nome)}</div><div class="small">${p.minuti ? '⏱ ' + fmtT(p.minuti) : ''}${p.minuti && g ? ' · ' : ''}${g ? '⚖ ' + Math.round(g) + ' g' : ''}${(p.piatti || []).length ? ' · 🍽 ' + p.piatti.length + ' piatti' : ''}${!has ? 'ore e grammi da inserire' : ''}</div></div>
       <div class="money">${eur(p.prezzo).replace(',00', '')}<small>${c ? 'costo ' + eur(c.tot) + ' · <span class="' + (m >= 0 ? 'pos' : 'neg') + '">' + (m >= 0 ? '+' : '') + eur(m) + '</span>' : 'prezzo'}</small></div></div>
     <div class="dots">${(p.colori || []).map(x => `<span class="dot ${hexOf(x) ? '' : 'x'}"><i style="background:${esc(hexOf(x))}"></i>${esc(x.nome)}</span>`).join('')}</div>
     <div class="meta"><div class="stp">In magazzino <button data-a="pn" data-id="${p.id}" data-d="-1">−</button><b>${p.scorta || 0}</b><button data-a="pn" data-id="${p.id}" data-d="1">+</button></div>
@@ -704,6 +704,7 @@ function compress(file, max = 320) {
     img.onerror = () => res(null); img.src = u;
   });
 }
+const plRow = n => `<div class="plr"><input class="inp ppn" type="text" ${OF} placeholder="Nome piatto (es. Corpo)" value="${esc(n)}"><button type="button" data-a="delpl" tabindex="-1">✕</button></div>`;
 function printSheet(p, isNew) {
   isNew = isNew || !p; p = p || { id: uid(), nome: '', prezzo: 0, scorta: 0, minuti: 0, colori: [], note: '', foto: 0, fu: 0 };
   if (!p.id) p = { ...p, id: uid() };
@@ -720,6 +721,8 @@ function printSheet(p, isNew) {
     <button class="btn sm" type="button" id="padd" style="margin-bottom:10px">+ Colore</button>
     <div class="g2"><div class="f"><label>Accessori extra €</label><input id="pex" type="number" min="0" step="any" inputmode="decimal" ${OF} value="${p.extra || ''}"></div>
     <div class="f"><label>Lavorazione (min)</label><input id="plv" type="number" min="0" step="1" inputmode="numeric" ${OF} value="${p.lav || ''}"></div></div>
+    <div class="lab" style="margin:8px 0 4px">Piatti / parti da stampare</div><div id="plrows">${(p.piatti || []).map(plRow).join('')}</div>
+    <button class="btn sm" type="button" id="pladd" style="margin-bottom:10px">+ Piatto</button>
     <div class="f"><label>File 3D / profilo (link 3MF, G-code, MakerWorld)</label><div class="row" style="flex-wrap:nowrap"><input id="pfl" class="inp" type="text" ${OF} value="${esc(p.file || '')}" placeholder="https://... oppure nota"><button class="btn sm" type="button" id="pfo">↗</button></div></div>
     <div class="f"><label>Foto</label><input id="pf" type="file" accept="image/*"></div>
     <div class="f"><label>Note</label><input id="pno" type="text" ${OF} value="${esc(p.note)}"></div>
@@ -746,6 +749,8 @@ function printSheet(p, isNew) {
         const b = e.target.closest('[data-a=delrow]'); if (b) { if ($$('.crow', el).length > 1) b.closest('.crow').remove(); else { $('.cname', el).value = ''; $('.cname', el).dataset.fid = ''; $('.cg', el).value = ''; } upd(); }
         const pc = e.target.closest('[data-pp]'); if (pc) { pid = pc.dataset.pp; $('#ppr', el).innerHTML = prChips(pid, 'data-pp'); upd(); }
       });
+      $('#pladd', el).onclick = () => { $('#plrows', el).insertAdjacentHTML('beforeend', plRow('Piatto ' + ($$('.ppn', el).length + 1))); const l = $$('.ppn', el).pop(); l.focus(); l.select(); };
+      el.addEventListener('click', e => { const b = e.target.closest('[data-a=delpl]'); if (b) b.closest('.plr').remove(); });
       $('#pfo', el).onclick = () => { const v = $('#pfl', el).value.trim(); if (/^https?:\/\//i.test(v)) openUrl(v); else toast('Inserisci un link che inizia con https://'); };
       $('#pf', el).onchange = async e => { const f = e.target.files[0]; if (f) { photo = await compress(f); photoChanged = true; showPh(); } };
     },
@@ -754,7 +759,7 @@ function printSheet(p, isNew) {
       Object.assign(p, {
         nome, prezzo: num($('#pp', el).value), scorta: Math.max(0, Math.round(num($('#ps', el).value))),
         minuti: Math.round(num($('#ph', el).value) * 60 + num($('#pm', el).value)), note: $('#pno', el).value.trim(), pid,
-        extra: num($('#pex', el).value), lav: num($('#plv', el).value), file: $('#pfl', el).value.trim(),
+        extra: num($('#pex', el).value), lav: num($('#plv', el).value), piatti: $$('.ppn', el).map(x => x.value.trim()).filter(Boolean), file: $('#pfl', el).value.trim(),
         colori: readRows($('#crows', el)).filter(r => r.name || num(r.g) > 0 || r.mm > 0).map(r => ({ fid: r.fid, nome: r.name || (fil(r.fid) ? fname(fil(r.fid)) : ''), g: num(r.g), m: r.mm || 0 })),
       });
       if (photoChanged) {
@@ -776,26 +781,35 @@ function viewQueue() {
   const item = q => {
     const n = q.pl.filter(Boolean).length, dn = isDone(q);
     return `<div class="qi${dn ? ' dn' : ''}"><div class="qh"><input type="checkbox" class="qc" data-a="qall" data-id="${q.id}" ${dn ? 'checked' : ''}>
-      <div class="qn">${esc(q.nome)}<small>${n}/${q.pl.length} piatti</small></div>
+      <div class="qn">${esc(q.nome)}<small>${n}/${q.pl.length} piatti${q.pid ? ' · da oggetto salvato' : ''}</small></div>
       <div class="qs"><button data-a="qn" data-id="${q.id}" data-d="-1">−</button><button data-a="qn" data-id="${q.id}" data-d="1">+</button><button data-a="qdel" data-id="${q.id}" aria-label="Elimina">🗑</button></div></div>
-      <div class="qp">${q.pl.map((x, i) => `<label class="${x ? 'on' : ''}"><input type="checkbox" data-a="qpl" data-id="${q.id}" data-i="${i}" ${x ? 'checked' : ''}>Piatto ${i + 1}</label>`).join('')}</div></div>`;
+      <div class="qp">${q.pl.map((x, i) => `<label class="${x ? 'on' : ''}"><input type="checkbox" data-a="qpl" data-id="${q.id}" data-i="${i}" ${x ? 'checked' : ''}>${esc((q.pn || [])[i] || 'Piatto ' + (i + 1))}</label>`).join('')}</div></div>`;
   };
   return `<div class="stats" style="grid-template-columns:repeat(2,1fr)"><div class="stat"><b>${todo.length}</b><span>Da stampare</span></div><div class="stat"><b>${miss}</b><span>Piatti mancanti</span></div></div>
   <div class="list">${todo.map(item).join('') || '<div class="empty">Coda vuota. Tocca + per aggiungere cosa stampare.</div>'}</div>
   ${done.length ? `<div class="lab" style="margin:14px 0 6px;display:flex;justify-content:space-between;align-items:center">Completati<button class="chip" data-a="qclear">Rimuovi completati</button></div><div class="list">${done.map(item).join('')}</div>` : ''}`;
 }
 function queueSheet() {
-  let pid = '';
+  let pr = null;
   const body = `<div class="f"><label>Cosa stampare (cerca tra le salvate o scrivi nuovo)</label><input id="qnm" type="text" ${OF} autocomplete="off" placeholder="es. Snoopy"></div>
-    <div class="f"><label>Numero di piatti</label><input id="qpn" type="number" min="1" step="1" inputmode="numeric" ${OF} value="1"></div>`;
+    <div id="qplw" hidden><div class="lab" style="margin:4px 0">Parti mancanti da stampare (togli la spunta a quelle già fatte)</div><div id="qpls"></div></div>
+    <div class="f" id="qnw"><label>Numero di piatti</label><input id="qpn" type="number" min="1" step="1" inputmode="numeric" ${OF} value="1"></div>`;
   openSheet('Aggiungi in coda', body, { label: 'Aggiungi', init: el => {
-    const inp = $('#qnm', el);
-    attachAC(inp, q => list('prints').filter(p => !q || p.nome.toLowerCase().includes(q.toLowerCase())).sort((a, b) => a.nome.localeCompare(b.nome)).map(p => ({ label: p.nome, p })), it => { inp.value = it.label; pid = it.p.id; $('#qpn', el).focus(); });
-    inp.addEventListener('input', () => { pid = ''; });
+    const inp = $('#qnm', el), show = () => {
+      const has = pr && (pr.piatti || []).length;
+      $('#qplw', el).hidden = !has; $('#qnw', el).hidden = !!has;
+      $('#qpls', el).innerHTML = has ? pr.piatti.map((n, i) => `<label class="row" style="font-size:.92rem;padding:4px 0"><input type="checkbox" class="qpk" data-i="${i}" checked style="width:20px;height:20px"> ${esc(n)}</label>`).join('') : '';
+    };
+    attachAC(inp, q => list('prints').filter(p => !q || p.nome.toLowerCase().includes(q.toLowerCase())).sort((a, b) => a.nome.localeCompare(b.nome)).map(p => ({ label: p.nome, sub: (p.piatti || []).length ? p.piatti.length + ' piatti' : '', p })), it => { inp.value = it.label; pr = it.p; show(); (pr.piatti || []).length ? 0 : $('#qpn', el).focus(); });
+    inp.addEventListener('input', () => { if (pr && pr.nome !== inp.value.trim()) { pr = null; show(); } });
   }, save: el => {
     const nome = $('#qnm', el).value.trim(); if (!nome) { toast('Scrivi cosa stampare'); return false; }
-    const n = Math.max(1, Math.min(50, Math.round(num($('#qpn', el).value) || 1)));
-    const q = { id: uid(), nome, pid, pl: Array(n).fill(0) }; S.queue.push(q); touch('queue', q); render();
+    if (!pr) pr = list('prints').find(x => x.nome.toLowerCase() === nome.toLowerCase()) || null;
+    let pn;
+    if (pr && (pr.piatti || []).length && !$('#qplw', el).hidden) { pn = $$('.qpk', el).filter(c => c.checked).map(c => pr.piatti[+c.dataset.i]); if (!pn.length) { toast('Seleziona almeno una parte'); return false; } }
+    else if (pr && (pr.piatti || []).length) pn = pr.piatti.slice();
+    else { const n = Math.max(1, Math.min(50, Math.round(num($('#qpn', el).value) || 1))); pn = Array.from({ length: n }, (_, i) => 'Piatto ' + (i + 1)); }
+    const q = { id: uid(), nome, pid: pr ? pr.id : '', pl: pn.map(() => 0), pn }; S.queue.push(q); touch('queue', q); render();
   } });
 }
 
@@ -844,7 +858,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v2.7</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v2.8</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
@@ -1033,7 +1047,7 @@ document.addEventListener('click', e => {
     if (act === 'sdel') { const x = S.sales.find(q => q.id === id); if (x) { x.d = 1; touch('sales', x); render(); toast('Vendita eliminata', () => { x.d = 0; touch('sales', x); render(); }); } return; }
     if (act === 'qpl') { const q = S.queue.find(x => x.id === id); if (q) { q.pl[+a.dataset.i] = q.pl[+a.dataset.i] ? 0 : 1; touch('queue', q); render(); } return; }
     if (act === 'qall') { const q = S.queue.find(x => x.id === id); if (q) { const v = q.pl.every(Boolean) ? 0 : 1; q.pl = q.pl.map(() => v); touch('queue', q); render(); } return; }
-    if (act === 'qn') { const q = S.queue.find(x => x.id === id); if (q) { const d = +a.dataset.d; if (d > 0) q.pl.push(0); else if (q.pl.length > 1) q.pl.pop(); touch('queue', q); render(); } return; }
+    if (act === 'qn') { const q = S.queue.find(x => x.id === id); if (q) { const d = +a.dataset.d; if (d > 0) { q.pl.push(0); (q.pn = q.pn || [])[q.pl.length - 1] = 'Piatto ' + q.pl.length; } else if (q.pl.length > 1) { q.pl.pop(); if (q.pn) q.pn.length = q.pl.length; } touch('queue', q); render(); } return; }
     if (act === 'qdel') { const q = S.queue.find(x => x.id === id); if (q) { q.d = 1; touch('queue', q); render(); } return; }
     if (act === 'qclear') { list('queue').filter(q => q.pl.every(Boolean)).forEach(q => { q.d = 1; touch('queue', q); }); render(); return; }
     if (act === 'sync') { if (!cfgOK()) { V.tab = 'set'; render(); } else syncNow(true); return; }
