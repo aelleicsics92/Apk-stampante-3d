@@ -161,3 +161,6 @@ body.kbopen #tabs,body.kbopen #fab{display:none}
 
 .fbar{display:flex;gap:8px;margin:2px 0 8px}.fbtn{flex:1;position:relative;display:flex;align-items:center;justify-content:center;gap:6px;padding:11px 10px;border-radius:14px;border:1.5px solid #a7f3d0;background:#ecfdf5;color:#065f46;font-weight:700;font-size:.92rem}
 .fbtn.on{background:linear-gradient(135deg,#10b981,#0ea5a4);color:#fff;border-color:transparent}.fbtn select{position:absolute;inset:0;width:100%;height:100%;opacity:0;font-size:16px}
+
+.seg{display:flex;background:#e5e7eb;border-radius:14px;padding:3px;margin-bottom:10px}.seg button{flex:1;padding:9px;border-radius:11px;font-weight:700;color:#6b7280}.seg button.on{background:#fff;color:#065f46;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.sellb{background:#ecfdf5;color:#065f46;font-weight:700}

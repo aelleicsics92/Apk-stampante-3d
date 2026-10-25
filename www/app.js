@@ -33,6 +33,7 @@ let S = jget(KEY, null);
 if (!S || !S.filaments) S = seedState();
 S.settings = { ...DEF_SETTINGS, ...S.settings };
 S.queue = S.queue || [];
+S.sales = S.sales || [];
 S.meta = { dirty: {}, photoDirty: {}, pushedAll: 0, ...S.meta };
 if (!S.meta.mig2) { // migrazione unica: marca Sunlu e costo 12,99 sulle bobine gia' presenti
   S.meta.mig2 = 1;
@@ -42,7 +43,7 @@ if (!S.meta.mig2) { // migrazione unica: marca Sunlu e costo 12,99 sulle bobine 
 const ensurePrinters = () => { if (!Array.isArray(S.settings.printers) || !S.settings.printers.length) S.settings.printers = [{ id: 'p1', nome: 'Bambu Lab P2S', watt: S.settings.watt || 150, usuraOra: S.settings.usuraOra ?? 0.25 }]; };
 ensurePrinters();
 let PHOTOS = jget(PH, {});
-let V = { tab: 'mag', q: '', flt: 'all', sort: 'nome', pq: '', ft: [], fc: [], fb: [] };
+let V = { tab: 'mag', q: '', flt: 'all', sort: 'nome', pv: 'obj', r0: '', r1: '', pq: '', ft: [], fc: [], fb: [] };
 const save = () => jset(KEY, S);
 const list = c => S[c].filter(x => !x.d);
 const fil = id => S.filaments.find(f => f.id === id && !f.d);
@@ -440,12 +441,53 @@ function filCard(f) {
       <a class="lk" data-a="resid" data-id="${f.id}" title="Imposta peso residuo">≈ ${f.residuo >= 1000 ? (f.residuo / 1000).toFixed(2) + ' kg' : Math.round(f.residuo) + ' g'} ✎</a></div></div>`;
 }
 
+const isoD = d => { const z = new Date(d.getTime() - d.getTimezoneOffset() * 6e4); return z.toISOString().slice(0, 10); };
+function monthRange(off) { const n = new Date(), a = new Date(n.getFullYear(), n.getMonth() + off, 1), b = new Date(n.getFullYear(), n.getMonth() + off + 1, 0); return [isoD(a), isoD(b)]; }
+function viewSales() {
+  if (!V.r0 || !V.r1) [V.r0, V.r1] = monthRange(0);
+  const all = list('sales').filter(x => x.data >= V.r0 && x.data <= V.r1).sort((a, b) => b.data.localeCompare(a.data) || (b.u || 0) - (a.u || 0));
+  const rev = x => (x.prezzo || 0) * (x.qty || 1), cst = x => (x.costo || 0) * (x.qty || 1);
+  const R = all.reduce((a, x) => a + rev(x), 0), C = all.reduce((a, x) => a + cst(x), 0), N = all.reduce((a, x) => a + (x.qty || 1), 0);
+  const byM = {}, byO = {};
+  all.forEach(x => { const m = x.data.slice(0, 7); (byM[m] = byM[m] || { r: 0, c: 0, n: 0 }); byM[m].r += rev(x); byM[m].c += cst(x); byM[m].n += x.qty || 1; const o = byO[x.nome] = byO[x.nome] || { r: 0, c: 0, n: 0 }; o.r += rev(x); o.c += cst(x); o.n += x.qty || 1; });
+  const MN = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'], ml = m => MN[+m.slice(5) - 1] + ' ' + m.slice(0, 4), dl = d => d.split('-').reverse().join('/');
+  const mg = (r, c) => `<b class="${r - c >= 0 ? 'pos' : 'neg'}">${eur(r - c)}</b>`;
+  return `<div class="seg"><button data-a="pv" data-k="obj">Oggetti</button><button class="on" data-a="pv" data-k="sales">Vendite</button></div>
+  <div class="chips"><button class="chip" data-a="srm" data-d="-1">‹ Prec.</button><button class="chip" data-a="srq" data-k="m0">Questo mese</button><button class="chip" data-a="srm" data-d="1">Succ. ›</button><button class="chip" data-a="srq" data-k="y">Anno</button><button class="chip" data-a="srq" data-k="all">Tutto</button></div>
+  <div class="g2" style="margin:8px 0"><div class="f"><label>Dal</label><input id="sr0" type="date" ${OF} value="${V.r0}"></div><div class="f"><label>Al</label><input id="sr1" type="date" ${OF} value="${V.r1}"></div></div>
+  <div class="stats"><div class="stat"><b>${eur(R).replace(',00', '')}</b><span>Vendite</span></div><div class="stat"><b>${eur(R - C).replace(',00', '')}</b><span>Margine</span></div><div class="stat"><b>${N}</b><span>Pezzi</span></div><div class="stat"><b>${R ? Math.round((R - C) / R * 100) + '%' : '—'}</b><span>Margine %</span></div></div>
+  ${Object.keys(byM).length > 1 ? `<div class="lab" style="margin:12px 0 4px">Per mese</div><table class="dt"><tr><th>Mese</th><th>Pezzi</th><th>Vendite</th><th>Margine</th></tr>${Object.keys(byM).sort().reverse().map(m => `<tr><td>${ml(m)}</td><td>${byM[m].n}</td><td>${eur(byM[m].r)}</td><td>${mg(byM[m].r, byM[m].c)}</td></tr>`).join('')}</table>` : ''}
+  ${Object.keys(byO).length ? `<div class="lab" style="margin:12px 0 4px">Per oggetto</div><table class="dt"><tr><th>Oggetto</th><th>Pezzi</th><th>Vendite</th><th>Margine</th></tr>${Object.entries(byO).sort((a, b) => b[1].r - a[1].r).map(([n, o]) => `<tr><td>${esc(n)}</td><td>${o.n}</td><td>${eur(o.r)}</td><td>${mg(o.r, o.c)}</td></tr>`).join('')}</table>` : ''}
+  <div class="lab" style="margin:12px 0 4px">Registro vendite</div>
+  <div class="list">${all.map(x => `<div class="qi"><div class="qh"><div class="qn">${esc(x.nome)}<small>${dl(x.data)} · ${x.qty || 1} × ${eur(x.prezzo)} · margine ${eur(rev(x) - cst(x))}</small></div><b>${eur(rev(x))}</b><div class="qs"><button data-a="sdel" data-id="${x.id}" aria-label="Elimina">🗑</button></div></div></div>`).join('') || '<div class="empty">Nessuna vendita nel periodo. Tocca + o "💰 Vendi" su un oggetto.</div>'}</div>`;
+}
+function sellSheet(p) {
+  let pr = p || null;
+  const body = `${p ? `<p style="margin:0 0 8px;font-weight:700">${esc(p.nome)}</p>` : `<div class="f"><label>Oggetto (cerca tra i salvati o scrivi)</label><input id="svn" type="text" ${OF} autocomplete="off" placeholder="es. Snoopy"></div>`}
+    <div class="g2"><div class="f"><label>Quantità</label><input id="svq" type="number" min="1" step="1" inputmode="numeric" ${OF} value="1"></div>
+    <div class="f"><label>Prezzo per pezzo €</label><input id="svp" type="number" min="0" step="any" inputmode="decimal" ${OF} value="${p ? p.prezzo || '' : ''}"></div></div>
+    <div class="f"><label>Data</label><input id="svd" type="date" ${OF} value="${isoD(new Date())}"></div>
+    <label class="row" style="font-size:.9rem;font-weight:600"><input id="svs" type="checkbox" ${p && p.scorta > 0 ? 'checked' : ''}> Scala dai pezzi in magazzino</label>`;
+  openSheet('Registra vendita', body, { label: 'Salva', init: el => {
+    if (!p) { const inp = $('#svn', el); attachAC(inp, q => list('prints').filter(x => !q || x.nome.toLowerCase().includes(q.toLowerCase())).sort((a, b) => a.nome.localeCompare(b.nome)).map(x => ({ label: x.nome, p: x })), it => { inp.value = it.label; pr = it.p; $('#svp', el).value = it.p.prezzo || ''; $('#svs', el).checked = it.p.scorta > 0; $('#svq', el).focus(); }); inp.addEventListener('input', () => { pr = null; }); }
+  }, save: el => {
+    const nome = p ? p.nome : $('#svn', el).value.trim(); if (!nome) { toast('Scegli l\'oggetto'); return false; }
+    const q = Math.max(1, Math.round(num($('#svq', el).value) || 1)), prezzo = num($('#svp', el).value), data = $('#svd', el).value || isoD(new Date());
+    if (!pr) pr = list('prints').find(x => x.nome.toLowerCase() === nome.toLowerCase()) || null;
+    const o = pr && list('prints').find(x => x.id === pr.id), has = o && (printGrams(o) > 0 || o.minuti > 0);
+    const rec = { id: uid(), pid: o ? o.id : '', nome, qty: q, prezzo, costo: has ? Math.round(printCalc(o).tot * 100) / 100 : 0, data };
+    S.sales.push(rec); touch('sales', rec);
+    if (o && $('#svs', el).checked && o.scorta > 0) { o.scorta = Math.max(0, o.scorta - q); touch('prints', o); }
+    toast('Vendita registrata'); render();
+  } });
+}
 function viewPrint() {
+  if (V.pv === 'sales') return viewSales();
   const all = list('prints'), q = V.pq.toLowerCase();
   const rows = all.filter(p => !q || p.nome.toLowerCase().includes(q) || (p.colori || []).some(c => c.nome.toLowerCase().includes(q))).sort((a, b) => a.nome.localeCompare(b.nome));
   const withCost = all.filter(p => printGrams(p) > 0 || p.minuti > 0);
   const marg = withCost.length ? withCost.reduce((a, p) => a + (p.prezzo - printCalc(p).tot), 0) / withCost.length : null;
-  return `<div class="stats">
+  return `<div class="seg"><button class="on" data-a="pv" data-k="obj">Oggetti</button><button data-a="pv" data-k="sales">Vendite</button></div><div class="stats">
     <div class="stat"><b>${all.length}</b><span>Oggetti</span></div>
     <div class="stat"><b>${all.reduce((a, p) => a + (p.scorta || 0), 0)}</b><span>In magazzino</span></div>
     <div class="stat"><b>${eur(all.reduce((a, p) => a + (p.scorta || 0) * (p.prezzo || 0), 0)).replace(',00', '')}</b><span>Valore</span></div>
@@ -454,6 +496,7 @@ function viewPrint() {
   <div style="height:10px"></div>
   <div class="list">${rows.map(printCard).join('') || '<div class="empty">Nessuna stampa. Tocca + per aggiungerne una.</div>'}</div>`;
 }
+const soldN = id => list('sales').filter(x => x.pid === id).reduce((a, x) => a + (x.qty || 1), 0);
 function printCard(p) {
   const g = printGrams(p), has = g > 0 || p.minuti > 0, c = has ? printCalc(p) : null, m = c ? p.prezzo - c.tot : null;
   const ph = PHOTOS[p.id] && PHOTOS[p.id].data;
@@ -463,7 +506,8 @@ function printCard(p) {
       <div class="money">${eur(p.prezzo).replace(',00', '')}<small>${c ? 'costo ' + eur(c.tot) + ' · <span class="' + (m >= 0 ? 'pos' : 'neg') + '">' + (m >= 0 ? '+' : '') + eur(m) + '</span>' : 'prezzo'}</small></div></div>
     <div class="dots">${(p.colori || []).map(x => `<span class="dot ${hexOf(x) ? '' : 'x'}"><i style="background:${esc(hexOf(x))}"></i>${esc(x.nome)}</span>`).join('')}</div>
     <div class="meta"><div class="stp">In magazzino <button data-a="pn" data-id="${p.id}" data-d="-1">−</button><b>${p.scorta || 0}</b><button data-a="pn" data-id="${p.id}" data-d="1">+</button></div>
-      ${p.file ? `<a class="lk has small" data-a="pfile" data-id="${p.id}">📎 File 3D</a>` : '<span class="small">+ = stampato (scala i grammi)</span>'}</div></div>`;
+      <button class="chip sellb" data-a="sell" data-id="${p.id}">💰 Vendi${soldN(p.id) ? ' · ' + soldN(p.id) : ''}</button>
+      ${p.file ? `<a class="lk has small" data-a="pfile" data-id="${p.id}">📎 File 3D</a>` : ''}</div></div>`;
 }
 
 /* ---------- calcolatore ---------- */
@@ -800,7 +844,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v2.6</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v2.7</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
@@ -852,7 +896,7 @@ function exportCsv(kind) {
   shareFile(new File([toCsv(rows)], kind === 'f' ? 'spoolio-bobine.csv' : 'spoolio-stampe.csv', { type: 'text/csv' }), 'Export Spoolio');
 }
 async function exportData() {
-  const data = JSON.stringify({ v: 1, filaments: list('filaments'), prints: list('prints'), queue: list('queue'), settings: S.settings, photos: PHOTOS }, null, 1);
+  const data = JSON.stringify({ v: 1, filaments: list('filaments'), prints: list('prints'), queue: list('queue'), sales: list('sales'), settings: S.settings, photos: PHOTOS }, null, 1);
   const file = new File([data], 'spoolio-backup.json', { type: 'application/json' });
   try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Backup Spoolio' }); return; } } catch (e) { if (e.name === 'AbortError') return; }
   const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; a.click(); toast('Backup scaricato');
@@ -861,7 +905,7 @@ async function importFile(f) {
   if (!f) return;
   try {
     const o = JSON.parse(await f.text()); let n = 0;
-    for (const c of ['filaments', 'prints', 'queue']) for (const r of o[c] || []) { const i = S[c].findIndex(x => x.id === r.id); if (i >= 0) S[c][i] = r; else S[c].push(r); touch(c, r); n++; }
+    for (const c of ['filaments', 'prints', 'queue', 'sales']) for (const r of o[c] || []) { const i = S[c].findIndex(x => x.id === r.id); if (i >= 0) S[c][i] = r; else S[c].push(r); touch(c, r); n++; }
     if (o.photos) { PHOTOS = { ...PHOTOS, ...o.photos }; jset(PH, PHOTOS); }
     if (o.settings) { S.settings = { ...S.settings, ...o.settings }; touch('settings', S.settings); }
     render(); toast(n + ' elementi importati');
@@ -908,13 +952,13 @@ async function syncNow(manual) {
   if (SY.busy) return; SY.busy = true; SY.state = 'busy'; setDot();
   try {
     const remote = {};
-    for (const c of ['filaments', 'prints', 'queue', 'settings']) remote[c] = await bGet(c);
+    for (const c of ['filaments', 'prints', 'queue', 'sales', 'settings']) remote[c] = await bGet(c);
     if (!S.meta.pushedAll && !Object.keys(remote.filaments).length && !Object.keys(remote.prints).length && !Object.keys(remote.settings).length) {
-      S.filaments.forEach(r => S.meta.dirty['filaments:' + r.id] = 1); S.prints.forEach(r => S.meta.dirty['prints:' + r.id] = 1); S.queue.forEach(r => S.meta.dirty['queue:' + r.id] = 1); S.meta.dirty['settings:main'] = 1;
+      S.filaments.forEach(r => S.meta.dirty['filaments:' + r.id] = 1); S.prints.forEach(r => S.meta.dirty['prints:' + r.id] = 1); S.queue.forEach(r => S.meta.dirty['queue:' + r.id] = 1); S.sales.forEach(r => S.meta.dirty['sales:' + r.id] = 1); S.meta.dirty['settings:main'] = 1;
     }
     S.meta.pushedAll = 1;
     let changed = false;
-    for (const c of ['filaments', 'prints', 'queue']) for (const id in remote[c]) {
+    for (const c of ['filaments', 'prints', 'queue', 'sales']) for (const id in remote[c]) {
       const r = remote[c][id]; if (!r || !r.id) continue; r.colori = r.colori || []; if (c === 'queue') r.pl = r.pl || [0];
       const i = S[c].findIndex(x => x.id === id);
       if (i < 0) { S[c].push(r); changed = true; } else if ((r.u || 0) > (S[c][i].u || 0)) { S[c][i] = r; delete S.meta.dirty[c + ':' + id]; changed = true; }
@@ -961,7 +1005,7 @@ function stepPrint(id, d) {
     prev.forEach(j => { const o = JSON.parse(j), f = fil(o.id); Object.assign(f, o); touch('filaments', f); }); render();
   });
 }
-document.addEventListener('change', e => { if (e.target.id === 'fsort') { V.sort = e.target.value; render(); } });
+document.addEventListener('change', e => { if (e.target.id === 'sr0' || e.target.id === 'sr1') { V[e.target.id === 'sr0' ? 'r0' : 'r1'] = e.target.value; if (V.r0 && V.r1) render(); } if (e.target.id === 'fsort') { V.sort = e.target.value; render(); } });
 document.addEventListener('click', e => {
   const tab = e.target.closest('#tabs [data-tab]'); if (tab) { V.tab = tab.dataset.tab; render(); scrollTo(0, 0); return; }
   const a = e.target.closest('[data-a]');
@@ -981,7 +1025,12 @@ document.addEventListener('click', e => {
     if (act === 'n') { e.stopPropagation(); stepFil(id, a.dataset.k, +a.dataset.d); return; }
     if (act === 'pn') { e.stopPropagation(); stepPrint(id, +a.dataset.d); return; }
     if (act === 'flt') { V.flt = (a.dataset.t && V.flt === a.dataset.k) ? 'all' : a.dataset.k; render(); return; }
-    if (act === 'add') { V.tab === 'print' ? printSheet() : V.tab === 'queue' ? queueSheet() : filSheet(); return; }
+    if (act === 'add') { V.tab === 'print' ? (V.pv === 'sales' ? sellSheet() : printSheet()) : V.tab === 'queue' ? queueSheet() : filSheet(); return; }
+    if (act === 'sell') { e.stopPropagation(); sellSheet(list('prints').find(x => x.id === id)); return; }
+    if (act === 'pv') { V.pv = a.dataset.k; render(); scrollTo(0, 0); return; }
+    if (act === 'srm') { const d = new Date(V.r0 + 'T12:00'); const o = new Date(d.getFullYear(), d.getMonth() + +a.dataset.d, 1); [V.r0, V.r1] = [isoD(o), isoD(new Date(o.getFullYear(), o.getMonth() + 1, 0))]; render(); return; }
+    if (act === 'srq') { const k = a.dataset.k, y = new Date().getFullYear(); if (k === 'm0') [V.r0, V.r1] = monthRange(0); else if (k === 'y') [V.r0, V.r1] = [y + '-01-01', y + '-12-31']; else [V.r0, V.r1] = ['2000-01-01', '2100-12-31']; render(); return; }
+    if (act === 'sdel') { const x = S.sales.find(q => q.id === id); if (x) { x.d = 1; touch('sales', x); render(); toast('Vendita eliminata', () => { x.d = 0; touch('sales', x); render(); }); } return; }
     if (act === 'qpl') { const q = S.queue.find(x => x.id === id); if (q) { q.pl[+a.dataset.i] = q.pl[+a.dataset.i] ? 0 : 1; touch('queue', q); render(); } return; }
     if (act === 'qall') { const q = S.queue.find(x => x.id === id); if (q) { const v = q.pl.every(Boolean) ? 0 : 1; q.pl = q.pl.map(() => v); touch('queue', q); render(); } return; }
     if (act === 'qn') { const q = S.queue.find(x => x.id === id); if (q) { const d = +a.dataset.d; if (d > 0) q.pl.push(0); else if (q.pl.length > 1) q.pl.pop(); touch('queue', q); render(); } return; }
