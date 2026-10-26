@@ -165,3 +165,13 @@ body.kbopen #tabs,body.kbopen #fab{display:none}
 .seg{display:flex;background:#e5e7eb;border-radius:14px;padding:3px;margin-bottom:10px}.seg button{flex:1;padding:9px;border-radius:11px;font-weight:700;color:#6b7280}.seg button.on{background:#fff;color:#065f46;box-shadow:0 1px 3px rgba(0,0,0,.1)}
 .sellb{background:#ecfdf5;color:#065f46;font-weight:700}
 .plr{display:grid;grid-template-columns:1fr 34px;gap:6px;margin-bottom:6px;align-items:center}.plr button{height:38px;border-radius:10px;background:#fee2e2;color:#b91c1c;font-weight:800}
+@media (min-width:900px){
+  #app{max-width:1180px}
+  #view{padding:18px 24px 0}
+  .list{display:grid!important;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:12px;align-items:start}
+  .stats{max-width:760px}
+  .sheet-bg{align-items:center}
+  .sheet{max-width:600px;border-radius:22px;max-height:88vh}
+  #tabs{max-width:1180px;left:50%;transform:translateX(-50%);border-radius:18px 18px 0 0}
+  #fab{right:max(24px,calc(50% - 560px))}
+}
