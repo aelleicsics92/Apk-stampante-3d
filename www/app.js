@@ -773,6 +773,99 @@ function printSheet(p, isNew) {
   });
 }
 
+/* ---------- Bambu cloud (sperimentale, solo APK) ---------- */
+const BBK = 'spoolio_bb', BBD = 'spoolio_bbd';
+const BBH = { 'Content-Type': 'application/json', 'User-Agent': 'bambu_network_agent/01.09.05.01', 'X-BBL-Client-Name': 'OrcaSlicer', 'X-BBL-Client-Type': 'slicer', 'X-BBL-Client-Version': '01.09.05.51', 'X-BBL-Language': 'en-US', 'X-BBL-OS-Type': 'android' };
+const bbCfg = () => jget(BBK, {});
+const BBP = () => { const C = window.Capacitor; if (!C || !C.registerPlugin || !(C.isNativePlatform ? C.isNativePlatform() : false)) return null; return (BBP.p = BBP.p || C.registerPlugin('BambuMqtt')); };
+async function bbHttp(method, path, body, tok) {
+  const url = 'https://api.bambulab.com' + path, headers = { ...BBH, ...(tok ? { Authorization: 'Bearer ' + tok } : {}) };
+  const H = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp;
+  let r;
+  if (H && H.request) r = await H.request({ url, method, headers, data: body || undefined });
+  else { const f = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined }); r = { status: f.status, data: await f.json().catch(() => ({})) }; }
+  let d = r.data; if (typeof d === 'string') { try { d = JSON.parse(d); } catch { throw new Error('Risposta non valida (HTTP ' + r.status + ')'); } }
+  if (r.status >= 400) throw new Error((d && (d.message || d.error)) || 'HTTP ' + r.status);
+  return d || {};
+}
+async function bbLogin(email, pass, code) {
+  const d = await bbHttp('POST', '/v1/user-service/user/login', code ? { account: email, code } : { account: email, password: pass });
+  if (!d.accessToken) {
+    if (d.loginType === 'verifyCode') { await bbHttp('POST', '/v1/user-service/user/sendemail/code', { email, type: 'codeLogin' }); return { need: 'code' }; }
+    if (d.loginType === 'tfa') throw new Error('Account con verifica 2FA: non supportato');
+    throw new Error(d.message || 'Login non riuscito');
+  }
+  const tok = d.accessToken, pr = await bbHttp('GET', '/v1/design-user-service/my/preference', null, tok);
+  if (!pr.uid) throw new Error('ID utente non trovato');
+  const dv = await bbHttp('GET', '/v1/iot-service/api/user/bind', null, tok);
+  const devices = (dv.devices || []).map(x => ({ id: x.dev_id, name: x.name || x.dev_product_name || x.dev_id }));
+  const old = bbCfg();
+  jset(BBK, { email, tok, uid: pr.uid, devices, dev: devices.find(x => x.id === old.dev) ? old.dev : (devices[0] ? devices[0].id : ''), t: Date.now() });
+  return { ok: 1 };
+}
+let BBS = { st: {}, conn: 'off', err: '', t: 0 }, BBON = false, BBNEED = '';
+const BBSTATE = { RUNNING: 'In stampa', PAUSE: 'In pausa', FINISH: 'Finita', IDLE: 'Libera', FAILED: 'Fallita', PREPARE: 'Preparazione', SLICING: 'Preparazione' };
+const nrm = t => String(t || '').toLowerCase().replace(/\.(3mf|gcode)$/g, '').replace(/[^a-z0-9]+/g, '');
+const bbJob = () => BBS.st.subtask_name || BBS.st.gcode_file || '';
+const bbKey = () => (BBS.st.task_id || BBS.st.job_id || '') + '|' + bbJob();
+function bbMatch() {
+  const job = nrm(bbJob()); if (!job) return null;
+  let best = null;
+  for (const q of list('queue')) {
+    const pend = q.pl.map((x, i) => (x ? -1 : i)).filter(i => i >= 0); if (!pend.length) continue;
+    const qn = nrm(q.nome); if (!qn || !(job.includes(qn) || qn.includes(job))) continue;
+    const i = pend.find(k => { const pn = nrm((q.pn || [])[k]); return pn && job.includes(pn); });
+    const m = { q, i: i !== undefined ? i : pend[0], exact: i !== undefined, len: qn.length };
+    if (!best || m.len > best.len) best = m;
+  }
+  return best;
+}
+function bbCardInner() {
+  const c = bbCfg(), st = BBS.st;
+  if (BBS.conn === 'err') return `<b>🖨 Bambu</b> <span class="small">non connessa${BBS.err ? ': ' + esc(BBS.err.slice(0, 80)) : ''}</span> <button class="chip" data-a="bbre">Riprova</button>`;
+  if (!st.gcode_state) return `<b>🖨 Bambu</b> <span class="small">${BBS.conn === 'ok' ? 'in attesa dei dati…' : 'connessione…'}</span>`;
+  const pct = Math.round(+st.mc_percent || 0), rem = +st.mc_remaining_time || 0, m = bbMatch(), fin = st.gcode_state === 'FINISH', done = jget(BBD, '') === bbKey();
+  const pn = m ? esc((m.q.pn || [])[m.i] || 'Piatto ' + (m.i + 1)) : '';
+  return `<div style="display:flex;justify-content:space-between;gap:8px"><b>🖨 ${esc((c.devices || []).find(x => x.id === c.dev)?.name || 'Bambu')} · ${BBSTATE[st.gcode_state] || esc(st.gcode_state)}</b><span class="small">${pct}%</span></div>
+    <div style="font-weight:600;margin:2px 0">${esc(bbJob() || '—')}</div>
+    <div style="height:8px;background:#e5e7eb;border-radius:6px;overflow:hidden"><i style="display:block;height:100%;width:${fin ? 100 : pct}%;background:linear-gradient(90deg,#10b981,#6366f1)"></i></div>
+    <div class="small" style="margin-top:4px">${st.layer_num ? 'Layer ' + st.layer_num + '/' + (st.total_layer_num || '?') + ' · ' : ''}${rem && !fin ? '⏱ ' + fmtT(rem) + ' rimasti · ' : ''}ugello ${Math.round(st.nozzle_temper || 0)}° · piatto ${Math.round(st.bed_temper || 0)}°</div>
+    ${m ? `<div class="small" style="margin-top:4px">Dalla coda: <b>${esc(m.q.nome)} · ${pn}</b>${m.exact ? '' : ' (probabile)'}</div>` : ''}
+    ${fin && !done ? `<div style="display:flex;gap:8px;margin-top:8px">${m ? `<button class="btn primary sm" data-a="bbdone" data-id="${m.q.id}" data-i="${m.i}">✔ Segna fatto: ${pn}</button>` : ''}<button class="btn sm" data-a="bbpick">${m ? 'Altro piatto…' : 'Segna un piatto…'}</button></div>` : ''}`;
+}
+function renderBB() { const el = $('#bbcard'); if (el) el.innerHTML = bbCardInner(); }
+function bbMsg(m) { try { const j = JSON.parse(m.payload); if (j.print) { Object.assign(BBS.st, j.print); BBS.t = Date.now(); renderBB(); } } catch { } }
+async function bbConnect() {
+  const P = BBP(), c = bbCfg(); if (!P || !c.tok || !c.dev || BBON) return;
+  BBON = true; BBS.conn = 'busy'; BBS.err = '';
+  if (!BBP.l) { BBP.l = 1; P.addListener('msg', bbMsg); P.addListener('lost', () => { BBS.conn = 'err'; BBON = false; renderBB(); }); }
+  try { await P.connect({ host: 'us.mqtt.bambulab.com', user: 'u_' + c.uid, pass: c.tok, topic: `device/${c.dev}/report`, reqTopic: `device/${c.dev}/request`, push: JSON.stringify({ pushing: { sequence_id: '0', command: 'pushall' } }) }); BBS.conn = 'ok'; }
+  catch (e) { BBS.conn = 'err'; BBS.err = String((e && e.message) || e); BBON = false; }
+  renderBB();
+}
+async function bbDisconnect() { const P = BBP(); if (P && BBON) { BBON = false; try { await P.disconnect(); } catch { } BBS.conn = 'off'; } }
+function bbPickSheet() {
+  const items = []; list('queue').forEach(q => q.pl.forEach((x, i) => { if (!x) items.push({ q, i }); }));
+  if (!items.length) { toast('Nessun piatto in coda'); return; }
+  openSheet('Quale piatto hai stampato?', items.map((x, k) => `<label class="row" style="padding:6px 0"><input type="radio" name="bbp" value="${k}" ${k === 0 ? 'checked' : ''} style="width:20px;height:20px"> ${esc(x.q.nome)} · ${esc((x.q.pn || [])[x.i] || 'Piatto ' + (x.i + 1))}</label>`).join(''), { label: 'Segna fatto', save: el => { const r = el.querySelector('input:checked'); if (!r) return false; const x = items[+r.value]; x.q.pl[x.i] = 1; touch('queue', x.q); jset(BBD, bbKey()); render(); } });
+}
+if (BBP()) {
+  setTimeout(bbConnect, 1500);
+  document.addEventListener('visibilitychange', () => { document.visibilityState === 'visible' ? bbConnect() : bbDisconnect(); });
+}
+function bbPanel() {
+  const P = BBP(), c = bbCfg();
+  if (!P) return `<div class="panel"><h3>Stampante Bambu Lab</h3><p class="hint">Disponibile solo nell'app Android.</p></div>`;
+  if (c.tok) return `<div class="panel"><h3>Stampante Bambu Lab</h3><p class="hint" style="margin:0 0 8px">Collegata come ${esc(c.email)} (sperimentale, cloud).</p>
+    <div class="f"><label>Stampante</label><select class="inp" id="bbdev" ${OF}>${(c.devices || []).map(d => `<option value="${esc(d.id)}" ${d.id === c.dev ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}</select></div>
+    <button class="btn sm danger" data-a="bblogout">Scollega account</button></div>`;
+  return `<div class="panel"><h3>Stampante Bambu Lab</h3><p class="hint" style="margin:0 0 8px">Vedi cosa sta stampando e segna i piatti dalla coda. Sperimentale: usa l'account Bambu (password non salvata).</p>
+    <div class="f"><label>Email Bambu</label><input class="inp" id="bb_em" type="email" ${OF} value="${esc(c.email || '')}"></div>
+    <div class="f"><label>Password</label><input class="inp" id="bb_pw" type="password" ${OF}></div>
+    ${BBNEED ? `<div class="f"><label>Codice ricevuto via mail</label><input class="inp" id="bb_cd" type="text" inputmode="numeric" ${OF}></div>` : ''}
+    <button class="btn primary sm" data-a="bblogin">${BBNEED ? 'Conferma codice' : 'Accedi'}</button></div>`;
+}
+
 /* ---------- coda di stampa ---------- */
 function viewQueue() {
   const all = list('queue'), isDone = q => q.pl.every(Boolean);
@@ -785,7 +878,8 @@ function viewQueue() {
       <div class="qs"><button data-a="qn" data-id="${q.id}" data-d="-1">−</button><button data-a="qn" data-id="${q.id}" data-d="1">+</button><button data-a="qdel" data-id="${q.id}" aria-label="Elimina">🗑</button></div></div>
       <div class="qp">${q.pl.map((x, i) => `<label class="${x ? 'on' : ''}"><input type="checkbox" data-a="qpl" data-id="${q.id}" data-i="${i}" ${x ? 'checked' : ''}>${esc((q.pn || [])[i] || 'Piatto ' + (i + 1))}</label>`).join('')}</div></div>`;
   };
-  return `<div class="stats" style="grid-template-columns:repeat(2,1fr)"><div class="stat"><b>${todo.length}</b><span>Da stampare</span></div><div class="stat"><b>${miss}</b><span>Piatti mancanti</span></div></div>
+  const bbc = BBP() && bbCfg().dev ? `<div class="qi" id="bbcard" style="margin-bottom:10px">${bbCardInner()}</div>` : '';
+  return `${bbc}<div class="stats" style="grid-template-columns:repeat(2,1fr)"><div class="stat"><b>${todo.length}</b><span>Da stampare</span></div><div class="stat"><b>${miss}</b><span>Piatti mancanti</span></div></div>
   <div class="list">${todo.map(item).join('') || '<div class="empty">Coda vuota. Tocca + per aggiungere cosa stampare.</div>'}</div>
   ${done.length ? `<div class="lab" style="margin:14px 0 6px;display:flex;justify-content:space-between;align-items:center">Completati<button class="chip" data-a="qclear">Rimuovi completati</button></div><div class="list">${done.map(item).join('')}</div>` : ''}`;
 }
@@ -840,6 +934,7 @@ function viewSet() {
     ${srow('manoOra', 'Manodopera €/ora', 'per la lavorazione manuale')}${srow('ricarico', 'Ricarico prezzo consigliato ×', 'costo × ricarico')}
     ${srow('costoKg', 'Costo di riserva €/kg', 'se la bobina non ha un costo')}${srow('soglia', 'Soglia scorta bassa (g)', 'sotto = badge "Basso"')}
     ${srow('sogliaNuove', 'Riordina se bobine nuove sotto', '0 = disattivo (es. 1)')}${srow('sogliaMin', 'Minimo bobine per ordine', '0 = automatico dal sito (es. "Min. 6")')}${srow('sogliaGr', 'Riordina se grammi totali sotto', '0 = disattivo (es. 500)')}</div>
+  ${bbPanel()}
   <div class="panel"><h3>Cloud condiviso</h3>
     <p class="hint" style="margin:0 0 10px">Stesso archivio su tutti i dispositivi. Senza cloud l'app funziona solo in locale.</p>
     <div class="f"><label>URL database (Supabase o Firebase)</label><input class="inp" id="c_url" type="text" ${OF} placeholder="https://xxxx.supabase.co" value="${esc(c.url)}"></div>
@@ -858,7 +953,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v2.9</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v3.0</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
@@ -1019,7 +1114,8 @@ function stepPrint(id, d) {
     prev.forEach(j => { const o = JSON.parse(j), f = fil(o.id); Object.assign(f, o); touch('filaments', f); }); render();
   });
 }
-document.addEventListener('change', e => { if (e.target.id === 'sr0' || e.target.id === 'sr1') { V[e.target.id === 'sr0' ? 'r0' : 'r1'] = e.target.value; if (V.r0 && V.r1) render(); } if (e.target.id === 'fsort') { V.sort = e.target.value; render(); } });
+document.addEventListener('change', e => { if (e.target.id === 'bbdev') { const c = bbCfg(); c.dev = e.target.value; jset(BBK, c); BBS.st = {}; bbDisconnect().then(() => bbConnect()); }
+   if (e.target.id === 'sr0' || e.target.id === 'sr1') { V[e.target.id === 'sr0' ? 'r0' : 'r1'] = e.target.value; if (V.r0 && V.r1) render(); } if (e.target.id === 'fsort') { V.sort = e.target.value; render(); } });
 document.addEventListener('click', e => {
   const tab = e.target.closest('#tabs [data-tab]'); if (tab) { V.tab = tab.dataset.tab; render(); scrollTo(0, 0); return; }
   const a = e.target.closest('[data-a]');
@@ -1045,6 +1141,11 @@ document.addEventListener('click', e => {
     if (act === 'srm') { const d = new Date(V.r0 + 'T12:00'); const o = new Date(d.getFullYear(), d.getMonth() + +a.dataset.d, 1); [V.r0, V.r1] = [isoD(o), isoD(new Date(o.getFullYear(), o.getMonth() + 1, 0))]; render(); return; }
     if (act === 'srq') { const k = a.dataset.k, y = new Date().getFullYear(); if (k === 'm0') [V.r0, V.r1] = monthRange(0); else if (k === 'y') [V.r0, V.r1] = [y + '-01-01', y + '-12-31']; else [V.r0, V.r1] = ['2000-01-01', '2100-12-31']; render(); return; }
     if (act === 'sdel') { const x = S.sales.find(q => q.id === id); if (x) { x.d = 1; touch('sales', x); render(); toast('Vendita eliminata', () => { x.d = 0; touch('sales', x); render(); }); } return; }
+    if (act === 'bblogin') { (async () => { const em = $('#bb_em').value.trim(), pw = $('#bb_pw').value, cd = $('#bb_cd') ? $('#bb_cd').value.trim() : ''; if (!em || (!pw && !cd)) { toast('Inserisci email e password'); return; } toast('Accesso…'); try { const r = await bbLogin(em, pw, cd); if (r.need) { BBNEED = em; toast('Codice inviato alla tua mail'); } else { BBNEED = ''; toast('Collegata'); BBON = false; bbConnect(); } render(); } catch (err) { toast('Errore: ' + (err.message || err)); } })(); return; }
+    if (act === 'bblogout') { bbDisconnect(); jset(BBK, {}); BBS = { st: {}, conn: 'off', err: '', t: 0 }; render(); return; }
+    if (act === 'bbre') { BBON = false; bbConnect(); return; }
+    if (act === 'bbdone') { const q = S.queue.find(x => x.id === id); if (q) { q.pl[+a.dataset.i] = 1; touch('queue', q); jset(BBD, bbKey()); render(); toast('Piatto segnato'); } return; }
+    if (act === 'bbpick') { bbPickSheet(); return; }
     if (act === 'qpl') { const q = S.queue.find(x => x.id === id); if (q) { q.pl[+a.dataset.i] = q.pl[+a.dataset.i] ? 0 : 1; touch('queue', q); render(); } return; }
     if (act === 'qall') { const q = S.queue.find(x => x.id === id); if (q) { const v = q.pl.every(Boolean) ? 0 : 1; q.pl = q.pl.map(() => v); touch('queue', q); render(); } return; }
     if (act === 'qn') { const q = S.queue.find(x => x.id === id); if (q) { const d = +a.dataset.d; if (d > 0) { q.pl.push(0); (q.pn = q.pn || [])[q.pl.length - 1] = 'Piatto ' + q.pl.length; } else if (q.pl.length > 1) { q.pl.pop(); if (q.pn) q.pn.length = q.pl.length; } touch('queue', q); render(); } return; }
