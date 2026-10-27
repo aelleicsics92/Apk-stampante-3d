@@ -777,7 +777,7 @@ function printSheet(p, isNew) {
 const BBK = 'spoolio_bb', BBD = 'spoolio_bbd';
 const BBH = { 'Content-Type': 'application/json', 'User-Agent': 'bambu_network_agent/01.09.05.01', 'X-BBL-Client-Name': 'OrcaSlicer', 'X-BBL-Client-Type': 'slicer', 'X-BBL-Client-Version': '01.09.05.51', 'X-BBL-Language': 'en-US', 'X-BBL-OS-Type': 'android' };
 const bbCfg = () => jget(BBK, {});
-const BBP = () => { const C = window.Capacitor; if (!C || !C.registerPlugin || !(C.isNativePlatform ? C.isNativePlatform() : false)) return null; return (BBP.p = BBP.p || C.registerPlugin('BambuMqtt')); };
+const BBP = () => { const C = window.Capacitor; if (!C || !C.registerPlugin || (C.getPlatform && C.getPlatform() === 'web')) return null; return (BBP.p = BBP.p || C.registerPlugin('BambuMqtt')); };
 async function bbHttp(method, path, body, tok) {
   const url = 'https://api.bambulab.com' + path, headers = { ...BBH, ...(tok ? { Authorization: 'Bearer ' + tok } : {}) };
   const H = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp;
@@ -855,7 +855,7 @@ if (BBP()) {
 }
 function bbPanel() {
   const P = BBP(), c = bbCfg();
-  if (!P) return `<div class="panel"><h3>Stampante Bambu Lab</h3><p class="hint">Disponibile solo nell'app Android.</p></div>`;
+  if (!P) return `<div class="panel"><h3>Stampante Bambu Lab</h3><p class="hint">Disponibile solo nell'app Android (stai usando la versione web o un APK vecchio).</p></div>`;
   if (c.tok) return `<div class="panel"><h3>Stampante Bambu Lab</h3><p class="hint" style="margin:0 0 8px">Collegata come ${esc(c.email)} (sperimentale, cloud).</p>
     <div class="f"><label>Stampante</label><select class="inp" id="bbdev" ${OF}>${(c.devices || []).map(d => `<option value="${esc(d.id)}" ${d.id === c.dev ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}</select></div>
     <button class="btn sm danger" data-a="bblogout">Scollega account</button></div>`;
@@ -953,7 +953,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v3.0</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v3.1</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
