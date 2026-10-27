@@ -876,8 +876,8 @@ function bbPanel() {
   return `<div class="panel"><h3>Stampante Bambu Lab</h3><p class="hint" style="margin:0 0 8px">Vedi cosa sta stampando e segna i piatti dalla coda. Sperimentale: usa l'account Bambu (password non salvata).</p>
     <div class="f"><label>Email Bambu</label><input class="inp" id="bb_em" type="email" ${OF} value="${esc(c.email || '')}"></div>
     <div class="f"><label>Password</label><input class="inp" id="bb_pw" type="password" ${OF}></div>
-    ${BBNEED ? `<div class="f"><label>Codice ricevuto via mail</label><input class="inp" id="bb_cd" type="text" inputmode="numeric" ${OF}></div>` : ''}
-    <button class="btn primary sm" data-a="bblogin">${BBNEED ? 'Conferma codice' : 'Accedi'}</button>
+    <div class="f"><label>Codice ricevuto via mail (se richiesto)</label><input class="inp" id="bb_cd" type="text" inputmode="numeric" ${OF} placeholder="6 cifre"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" data-a="bbsend">Invia codice alla mail</button><button class="btn primary sm" data-a="bblogin">Accedi</button></div>
     <details style="margin-top:10px"><summary class="small">Se l'accesso viene bloccato: incolla il token</summary><div class="f" style="margin-top:8px"><label>Token di accesso Bambu</label><input class="inp" id="bb_tk" type="text" ${OF} placeholder="eyJ..."></div><button class="btn sm" data-a="bbtok">Usa token</button></details></div>`;
 }
 
@@ -968,7 +968,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v3.3</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v3.4</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
@@ -1156,7 +1156,8 @@ document.addEventListener('click', e => {
     if (act === 'srm') { const d = new Date(V.r0 + 'T12:00'); const o = new Date(d.getFullYear(), d.getMonth() + +a.dataset.d, 1); [V.r0, V.r1] = [isoD(o), isoD(new Date(o.getFullYear(), o.getMonth() + 1, 0))]; render(); return; }
     if (act === 'srq') { const k = a.dataset.k, y = new Date().getFullYear(); if (k === 'm0') [V.r0, V.r1] = monthRange(0); else if (k === 'y') [V.r0, V.r1] = [y + '-01-01', y + '-12-31']; else [V.r0, V.r1] = ['2000-01-01', '2100-12-31']; render(); return; }
     if (act === 'sdel') { const x = S.sales.find(q => q.id === id); if (x) { x.d = 1; touch('sales', x); render(); toast('Vendita eliminata', () => { x.d = 0; touch('sales', x); render(); }); } return; }
-    if (act === 'bblogin') { (async () => { const em = $('#bb_em').value.trim(), pw = $('#bb_pw').value, cd = $('#bb_cd') ? $('#bb_cd').value.trim() : ''; if (!em || (!pw && !cd)) { toast('Inserisci email e password'); return; } toast('Accesso…'); try { const r = await bbLogin(em, pw, cd); if (r.need) { BBNEED = em; toast('Codice inviato alla tua mail'); } else { BBNEED = ''; toast('Collegata'); BBON = false; bbConnect(); } render(); } catch (err) { toast('Errore: ' + (err.message || err)); } })(); return; }
+    if (act === 'bblogin') { (async () => { const em = $('#bb_em').value.trim(), pw = $('#bb_pw').value, cd = $('#bb_cd') ? $('#bb_cd').value.trim() : ''; if (!em || (!pw && !cd)) { toast('Inserisci email e password, oppure email e codice'); return; } toast('Accesso…'); try { const r = await bbLogin(em, pw, cd); if (r.need) { BBNEED = em; toast('Codice inviato alla tua mail'); } else { BBNEED = ''; toast('Collegata'); BBON = false; bbConnect(); } render(); } catch (err) { toast('Errore: ' + (err.message || err)); } })(); return; }
+    if (act === 'bbsend') { (async () => { const em = $('#bb_em').value.trim(); if (!em) { toast('Inserisci l\'email'); return; } try { await bbHttp('POST', '/v1/user-service/user/sendemail/code', { email: em, type: 'codeLogin' }); toast('Codice inviato, poi inseriscilo e tocca Accedi'); } catch (err) { toast('Errore: ' + (err.message || err)); } })(); return; }
     if (act === 'bbtok') { (async () => { const t = $('#bb_tk').value.trim(); if (!t) { toast('Incolla il token'); return; } try { await bbFromToken(t, $('#bb_em').value.trim()); toast('Collegata'); BBON = false; bbConnect(); render(); } catch (err) { toast('Errore: ' + (err.message || err)); } })(); return; }
     if (act === 'bblogout') { bbDisconnect(); jset(BBK, {}); BBS = { st: {}, conn: 'off', err: '', t: 0 }; render(); return; }
     if (act === 'bbre') { BBON = false; bbConnect(); return; }
