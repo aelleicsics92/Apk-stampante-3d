@@ -501,13 +501,14 @@ function platesOf(p) {
   const m = new Map();
   (p.colori || []).forEach((c, i) => {
     const n = (c.piatto || '').trim() || 'Piatto ' + (i + 1);
-    if (!m.has(n)) m.set(n, []);
-    const f = c.fid && fil(c.fid);
-    m.get(n).push({ fid: f ? f.id : '', n: f ? fname(f) : (c.nome || ''), h: hexOf(c), g: num(c.g) });
+    if (!m.has(n)) m.set(n, { colors: [], min: 0 });
+    const f = c.fid && fil(c.fid), o = m.get(n); o.min += num(c.m);
+    o.colors.push({ fid: f ? f.id : '', n: f ? fname(f) : (c.nome || ''), h: hexOf(c), g: num(c.g) });
   });
-  if (!m.size) (p.piatti || []).forEach(n => m.set(n, []));
-  return [...m].map(([name, colors]) => ({ name, colors }));
+  if (!m.size) (p.piatti || []).forEach(n => m.set(n, { colors: [], min: 0 }));
+  return [...m].map(([name, o]) => ({ name, colors: o.colors, min: o.min }));
 }
+const qMin = (q, i) => { const o = q.pid && list('prints').find(x => x.id === q.pid), pl = o ? platesOf(o).find(x => x.name === (q.pn || [])[i]) : null; return pl ? pl.min : 0; };
 /* spunta/annulla un piatto della coda, scalando i grammi dal filamento scelto */
 function qDelta(f, fn) { const b = { n: f.nuove, u: f.usate, r: f.residuo }; fn(); return { fid: f.id, dn: f.nuove - b.n, du: f.usate - b.u, dr: f.residuo - b.r }; }
 function qApply(q, i) { // segna fatto: scala i filamenti assegnati; ritorna i grammi non assegnati
@@ -962,9 +963,9 @@ function viewQueue() {
   const item = q => {
     const n = q.pl.filter(Boolean).length, dn = isDone(q);
     return `<div class="qi${dn ? ' dn' : ''}"><div class="qh"><input type="checkbox" class="qc" data-a="qall" data-id="${q.id}" ${dn ? 'checked' : ''}>
-      <div class="qn">${esc(q.nome)}<small>${n}/${q.pl.length} piatti${q.pid ? ' · da oggetto salvato' : ''}</small></div>
+      <div class="qn">${esc(q.nome)}<small>${n}/${q.pl.length} piatti${(() => { const t = q.pl.reduce((a, x, i) => a + (x ? 0 : qMin(q, i)), 0); return t ? ' · ⏱ ' + fmtT(t) + ' da stampare' : ''; })()}</small></div>
       <div class="qs"><button data-a="qn" data-id="${q.id}" data-d="-1">−</button><button data-a="qn" data-id="${q.id}" data-d="1">+</button><button data-a="qdel" data-id="${q.id}" aria-label="Elimina">🗑</button></div></div>
-      <div class="qp">${q.pl.map((x, i) => `<div class="qpl ${x ? 'on' : ''}"><label><input type="checkbox" data-a="qpl" data-id="${q.id}" data-i="${i}" ${x ? 'checked' : ''}><b>${esc((q.pn || [])[i] || 'Piatto ' + (i + 1))}</b></label>
+      <div class="qp">${q.pl.map((x, i) => `<div class="qpl ${x ? 'on' : ''}"><label><input type="checkbox" data-a="qpl" data-id="${q.id}" data-i="${i}" ${x ? 'checked' : ''}><b>${esc((q.pn || [])[i] || 'Piatto ' + (i + 1))}</b>${qMin(q, i) ? `<span class="small" style="margin-left:auto">⏱ ${fmtT(qMin(q, i))}</span>` : ''}</label>
         <div class="qcs">${(((q.pc || [])[i]) || []).map((c, j) => c.fid ? `<span class="qcc"><i class="cd" style="background:${esc(c.h || '#999')}"></i>${esc(c.n)}${c.g ? ` · ${Math.round(c.g)} g` : ''}${x ? '' : ` <a data-a="qcol" data-id="${q.id}" data-i="${i}" data-j="${j}">cambia</a>`}</span>` : c.skip ? `<span class="qcc">senza scalare ${x ? '' : `<a data-a="qcol" data-id="${q.id}" data-i="${i}" data-j="${j}">scegli</a>`}</span>` : `<button class="chip qcb" data-a="qcol" data-id="${q.id}" data-i="${i}" data-j="${j}">🎨 ${c.n ? esc(c.n) : 'Scegli colore'}${c.g ? ' · ' + Math.round(c.g) + ' g' : ''}</button>`).join('')}</div></div>`).join('')}</div></div>`;
   };
   const bbc = BBP() && bbCfg().dev ? `<div class="qi" id="bbcard" style="margin-bottom:10px">${bbCardInner()}</div>` : '';
@@ -980,7 +981,7 @@ function queueSheet() {
     const inp = $('#qnm', el), show = () => {
       const pl = pr ? platesOf(pr) : [], has = pl.length > 0;
       $('#qplw', el).hidden = !has;
-      $('#qpls', el).innerHTML = has ? pl.map((x, i) => `<label class="row" style="font-size:.92rem;padding:4px 0"><input type="checkbox" class="qpk" data-i="${i}" checked style="width:20px;height:20px"> <span>${esc(x.name)}<small style="display:block;color:#6b7280">${x.colors.map(c => esc(c.n)).join(', ')}</small></span></label>`).join('') : '';
+      $('#qpls', el).innerHTML = has ? pl.map((x, i) => `<label class="row" style="font-size:.92rem;padding:4px 0"><input type="checkbox" class="qpk" data-i="${i}" checked style="width:20px;height:20px"> <span>${esc(x.name)}<small style="display:block;color:#6b7280">${x.colors.map(c => esc(c.n)).join(', ')}${x.min ? ' · ⏱ ' + fmtT(x.min) : ''}</small></span></label>`).join('') : '';
     };
     attachAC(inp, q => list('prints').filter(p => !q || p.nome.toLowerCase().includes(q.toLowerCase())).sort((a, b) => a.nome.localeCompare(b.nome)).map(p => ({ label: p.nome, sub: platesOf(p).length ? platesOf(p).length + ' piatti' : '', p })), it => { inp.value = it.label; pr = it.p; show(); });
     inp.addEventListener('input', () => { if (pr && pr.nome !== inp.value.trim()) { pr = null; show(); } });
@@ -1043,7 +1044,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v3.8</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v3.9</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
