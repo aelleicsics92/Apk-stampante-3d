@@ -314,7 +314,7 @@ let sheet = null, skipPop = false;
 function openSheet(title, body, o = {}) {
   removeSheet();
   const el = document.createElement('div'); el.className = 'sheet-bg';
-  el.innerHTML = `<div class="sheet" role="dialog"><div class="grab"></div><h2>${esc(title)}</h2><div class="sbody">${body}</div><div class="sbtns">${o.del ? '<button class="btn danger" data-s="del">Elimina</button>' : ''}<span style="flex:1"></span><button class="btn ghost" data-s="x">Annulla</button><button class="btn primary" data-s="ok">${o.label || 'Salva'}</button></div></div>`;
+  el.innerHTML = `<div class="sheet" role="dialog"><div class="grab"></div><h2>${esc(title)}</h2><div class="sbody">${body}</div><div class="sbtns">${o.del ? '<button class="btn danger" data-s="del">Elimina</button>' : ''}${o.dup ? '<button class="btn ghost" data-s="dup">⧉ Duplica</button>' : ''}<span style="flex:1"></span><button class="btn ghost" data-s="x">Annulla</button><button class="btn primary" data-s="ok">${o.label || 'Salva'}</button></div></div>`;
   document.body.appendChild(el);
   sheet = { el, ...o }; history.pushState({ sheet: 1 }, '');
   const doSave = () => { if (o.save && o.save(el) === false) return; closeSheet(); };
@@ -323,6 +323,7 @@ function openSheet(title, body, o = {}) {
     const b = e.target.closest('[data-s]'); if (!b) return;
     if (b.dataset.s === 'x') closeSheet();
     else if (b.dataset.s === 'ok') doSave();
+    else if (b.dataset.s === 'dup') o.dup(el);
     else if (b.dataset.s === 'del') {
       if (!b.dataset.sure) { b.dataset.sure = 1; b.textContent = 'Sicuro? Tocca ancora'; setTimeout(() => { b.dataset.sure = ''; b.textContent = 'Elimina'; }, 3000); return; }
       o.del(); closeSheet();
@@ -797,6 +798,11 @@ function printSheet(p, isNew) {
     <div class="f"><label>Note</label><input id="pno" type="text" ${OF} value="${esc(p.note)}"></div>
     <table class="dt" id="pbreak"></table><p class="hint" id="pgain"></p>`;
   openSheet(isNew ? 'Nuova stampa' : 'Modifica stampa', body, {
+    dup: isNew ? null : el => {
+      const d = { nome: $('#pn', el).value.trim() + ' (copia)', prezzo: num($('#pp', el).value), scorta: 0, minuti: Math.round(num($('#ph', el).value) * 60 + num($('#pm', el).value)), pid, extra: num($('#pex', el).value), lav: num($('#plv', el).value), file: $('#pfl', el).value.trim(), note: $('#pno', el).value.trim(), foto: 0, fu: 0,
+        colori: readRows($('#crows', el)).filter(r => r.name || num(r.g) > 0 || r.mm > 0).map(r => ({ fid: r.fid, nome: r.name, g: num(r.g), m: r.mm || 0, piatto: r.pt || '' })) };
+      closeSheet(); setTimeout(() => { printSheet(d, true); const n = $('#pn'); if (n) { n.focus(); n.select(); } toast('Copia pronta: modifica e salva'); }, 80);
+    },
     del: isNew ? null : () => { p.d = 1; touch('prints', p); delete PHOTOS[p.id]; jset(PH, PHOTOS); render(); toast('Stampa eliminata'); },
     init: el => {
       const showPh = () => { $('#pph', el).innerHTML = photo ? `<img class="photo" src="${photo}" alt=""><button class="btn sm danger" type="button" id="prm" style="margin-bottom:8px">Rimuovi foto</button>` : ''; const r = $('#prm', el); if (r) r.onclick = () => { photo = null; photoChanged = true; showPh(); }; };
@@ -1037,7 +1043,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v3.7</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v3.8</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
