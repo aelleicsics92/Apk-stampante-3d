@@ -166,12 +166,12 @@ body.kbopen #tabs,body.kbopen #fab{display:none}
 .sellb{background:#ecfdf5;color:#065f46;font-weight:700}
 .plr{display:grid;grid-template-columns:1fr 34px;gap:6px;margin-bottom:6px;align-items:center}.plr button{height:38px;border-radius:10px;background:#fee2e2;color:#b91c1c;font-weight:800}
 @media (min-width:900px){
-  #app{max-width:1180px}
-  #view{padding:18px 24px 0}
-  .list{display:grid!important;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:12px;align-items:start}
-  .stats{max-width:760px}
+  body{background:#e8ecef}
+  #app{max-width:760px;background:var(--bg);min-height:100vh;box-shadow:0 0 40px rgba(0,0,0,.08)}
+  #tabs{max-width:760px;left:50%;transform:translateX(-50%)}
   .sheet-bg{align-items:center}
   .sheet{max-width:600px;border-radius:22px;max-height:88vh}
-  #tabs{max-width:1180px;left:50%;transform:translateX(-50%);border-radius:18px 18px 0 0}
-  #fab{right:max(24px,calc(50% - 560px))}
+  #fab{right:max(24px,calc(50% - 360px))}
 }
+.cd{display:inline-block;width:9px;height:9px;border-radius:50%;border:1px solid #0003;margin:0 3px 0 4px;vertical-align:middle}.qp label small{display:block;font-size:.7rem;color:#6b7280;font-weight:500}
+.ctm .cpt{padding:7px 8px}

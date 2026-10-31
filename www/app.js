@@ -477,7 +477,7 @@ function sellSheet(p) {
     const o = pr && list('prints').find(x => x.id === pr.id), has = o && (printGrams(o) > 0 || o.minuti > 0);
     const rec = { id: uid(), pid: o ? o.id : '', nome, qty: q, prezzo, costo: has ? Math.round(printCalc(o).tot * 100) / 100 : 0, data };
     S.sales.push(rec); touch('sales', rec);
-    if (o && $('#svs', el).checked && o.scorta > 0) { o.scorta = Math.max(0, o.scorta - q); touch('prints', o); }
+    if (o && $('#svs', el).checked && o.scorta > 0) { o.scorta = Math.max(0, o.scorta - q); touch('prints', o); ensureQueue(o); }
     toast('Vendita registrata'); render();
   } });
 }
@@ -496,15 +496,31 @@ function viewPrint() {
   <div style="height:10px"></div>
   <div class="list">${rows.map(printCard).join('') || '<div class="empty">Nessuna stampa. Tocca + per aggiungerne una.</div>'}</div>`;
 }
+function platesOf(p) {
+  const m = new Map();
+  for (const c of p.colori || []) { const n = (c.piatto || '').trim() || 'Piatto 1'; if (!m.has(n)) m.set(n, []); if (c.nome) m.get(n).push({ n: c.nome, h: hexOf(c) }); }
+  if (!m.size) (p.piatti || []).forEach(n => m.set(n, []));
+  return [...m].map(([name, colors]) => ({ name, colors }));
+}
+function ensureQueue(p) {
+  if (!p || p.d || (p.scorta || 0) > 0) return;
+  if (list('queue').some(x => x.pid === p.id && x.id !== 'auto_' + p.id && !x.pl.every(Boolean))) return;
+  const pl = platesOf(p), pls = pl.length ? pl : [{ name: 'Piatto 1', colors: [] }], id = 'auto_' + p.id;
+  let q = S.queue.find(x => x.id === id);
+  if (q && !q.d && !q.pl.every(Boolean)) return;
+  if (!q) { q = { id, pid: p.id }; S.queue.push(q); }
+  Object.assign(q, { d: 0, nome: p.nome, pl: pls.map(() => 0), pn: pls.map(x => x.name), pc: pls.map(x => x.colors) });
+  touch('queue', q);
+}
 const soldN = id => list('sales').filter(x => x.pid === id).reduce((a, x) => a + (x.qty || 1), 0);
 function printCard(p) {
   const g = printGrams(p), has = g > 0 || p.minuti > 0, c = has ? printCalc(p) : null, m = c ? p.prezzo - c.tot : null;
   const ph = PHOTOS[p.id] && PHOTOS[p.id].data;
   return `<div class="card" data-id="${p.id}" data-c="p">
     <div class="crow1">${ph ? `<img class="thumb" src="${ph}" alt="">` : '<div class="thumb">🧸</div>'}
-      <div class="ti"><div class="name">${esc(p.nome)}</div><div class="small">${p.minuti ? '⏱ ' + fmtT(p.minuti) : ''}${p.minuti && g ? ' · ' : ''}${g ? '⚖ ' + Math.round(g) + ' g' : ''}${(p.piatti || []).length ? ' · 🍽 ' + p.piatti.length + ' piatti' : ''}${!has ? 'ore e grammi da inserire' : ''}</div></div>
+      <div class="ti"><div class="name">${esc(p.nome)}</div><div class="small">${p.minuti ? '⏱ ' + fmtT(p.minuti) : ''}${p.minuti && g ? ' · ' : ''}${g ? '⚖ ' + Math.round(g) + ' g' : ''}${(() => { const np = new Set((p.colori || []).map(c => c.piatto).filter(Boolean)).size || (p.piatti || []).length; return np ? ' · 🍽 ' + np + ' piatti' : ''; })()}${!has ? 'ore e grammi da inserire' : ''}</div></div>
       <div class="money">${eur(p.prezzo).replace(',00', '')}<small>${c ? 'costo ' + eur(c.tot) + ' · <span class="' + (m >= 0 ? 'pos' : 'neg') + '">' + (m >= 0 ? '+' : '') + eur(m) + '</span>' : 'prezzo'}</small></div></div>
-    <div class="dots">${(p.colori || []).map(x => `<span class="dot ${hexOf(x) ? '' : 'x'}"><i style="background:${esc(hexOf(x))}"></i>${esc(x.nome)}</span>`).join('')}</div>
+    <div class="dots">${(p.colori || []).slice(0, 3).map(x => `<span class="dot ${hexOf(x) ? '' : 'x'}"><i style="background:${esc(hexOf(x))}"></i>${esc(x.nome)}</span>`).join('')}${(p.colori || []).length > 3 ? `<span class="dot x">+${p.colori.length - 3}</span>` : ''}</div>
     <div class="meta"><div class="stp">In magazzino <button data-a="pn" data-id="${p.id}" data-d="-1">−</button><b>${p.scorta || 0}</b><button data-a="pn" data-id="${p.id}" data-d="1">+</button></div>
       <button class="chip sellb" data-a="sell" data-id="${p.id}">💰 Vendi${soldN(p.id) ? ' · ' + soldN(p.id) : ''}</button>
       ${p.file ? `<a class="lk has small" data-a="pfile" data-id="${p.id}">📎 File 3D</a>` : ''}</div></div>`;
@@ -533,7 +549,7 @@ function viewCalc() {
   <button class="btn primary" style="width:100%" data-a="saveprint">Salva come stampa</button>`;
 }
 function rowHtml(r, t) {
-  const tm = t || r.t ? `<div class="ctm"><span>⏱ tempo</span><input class="inp cth" type="number" min="0" step="1" inputmode="numeric" ${OF} placeholder="ore" value="${r.mm ? Math.floor(r.mm / 60) || '' : ''}"><input class="inp ctmn" type="number" min="0" max="59" step="1" inputmode="numeric" ${OF} placeholder="min" value="${r.mm ? r.mm % 60 || '' : ''}"></div>` : '';
+  const tm = t || r.t ? `<div class="ctm"><span>⏱</span><input class="inp cth" type="number" min="0" step="1" inputmode="numeric" ${OF} placeholder="ore" value="${r.mm ? Math.floor(r.mm / 60) || '' : ''}"><input class="inp ctmn" type="number" min="0" max="59" step="1" inputmode="numeric" ${OF} placeholder="min" value="${r.mm ? r.mm % 60 || '' : ''}"><span>🍽</span><input class="inp cpt" type="text" ${OF} placeholder="Nome piatto" value="${esc(r.pt || '')}" style="flex:1;width:auto;min-width:90px"></div>` : '';
   return `<div class="crow${tm ? ' wt' : ''}"><input class="inp cname" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Marca / colore" value="${esc(r.name)}" data-fid="${esc(r.fid || '')}"><input class="inp cg" type="number" min="0" step="any" inputmode="decimal" ${OF} placeholder="grammi" value="${esc(r.g)}"><button data-a="delrow" tabindex="-1">✕</button>${tm}</div>`;
 }
 function bindRows(root, onChange) {
@@ -548,7 +564,7 @@ function bindRows(root, onChange) {
     });
   });
 }
-const readRows = root => $$('.crow', root).map(r => ({ fid: $('.cname', r).dataset.fid || '', name: $('.cname', r).value.trim(), g: $('.cg', r).value, mm: $('.cth', r) ? num($('.cth', r).value) * 60 + num($('.ctmn', r).value) : 0 }));
+const readRows = root => $$('.crow', root).map(r => ({ fid: $('.cname', r).dataset.fid || '', name: $('.cname', r).value.trim(), g: $('.cg', r).value, mm: $('.cth', r) ? num($('.cth', r).value) * 60 + num($('.ctmn', r).value) : 0, pt: $('.cpt', r) ? $('.cpt', r).value.trim() : '' }));
 function breakHtml(r) {
   const row = (l, v) => `<tr><td>${l}</td><td>${eur(v)}</td></tr>`, st = S.settings;
   return `<tr><th>Voce</th><th>Costo</th></tr>${row('Filamento', r.mat)}${r.purge > 0 ? row(`Spreco cambio colore (${st.purge}%)`, r.purge) : ''}${row(`Energia (${eur(r.kwhP)}/kWh · ${r.pr.watt} W)`, r.en)}${row('Usura ' + esc(r.pr.nome), r.us)}${row(`Rischio fallimento (${st.fallimento}%)`, r.fail)}${r.lav > 0 ? row('Lavorazione manuale', r.lav) : ''}${r.extra > 0 ? row('Accessori extra', r.extra) : ''}<tr class="tot"><td>Totale</td><td>${eur(r.tot)}</td></tr>${row(`Prezzo consigliato (×${st.ricarico})`, r.price)}`;
@@ -709,7 +725,7 @@ function printSheet(p, isNew) {
   isNew = isNew || !p; p = p || { id: uid(), nome: '', prezzo: 0, scorta: 0, minuti: 0, colori: [], note: '', foto: 0, fu: 0 };
   if (!p.id) p = { ...p, id: uid() };
   let photo = (PHOTOS[p.id] && PHOTOS[p.id].data) || null, photoChanged = false, pid = p.pid || '';
-  const rows = (p.colori && p.colori.length ? p.colori : [{ fid: '', nome: '', g: '' }]).map(c => ({ fid: c.fid, name: c.nome, g: c.g || '', mm: c.m || 0, t: 1 }));
+  const rows = (p.colori && p.colori.length ? p.colori : [{ fid: '', nome: '', g: '' }]).map(c => ({ fid: c.fid, name: c.nome, g: c.g || '', mm: c.m || 0, pt: c.piatto || '', t: 1 }));
   const body = `<div id="pph"></div>
     <div class="f"><label>Nome oggetto</label><input id="pn" type="text" ${OF} value="${esc(p.nome)}" placeholder="es. Snoopy"></div>
     <div class="g2"><div class="f"><label>Prezzo vendita €</label><input id="pp" type="number" min="0" step="any" inputmode="decimal" ${OF} value="${p.prezzo || ''}"></div>
@@ -721,8 +737,6 @@ function printSheet(p, isNew) {
     <button class="btn sm" type="button" id="padd" style="margin-bottom:10px">+ Colore</button>
     <div class="g2"><div class="f"><label>Accessori extra €</label><input id="pex" type="number" min="0" step="any" inputmode="decimal" ${OF} value="${p.extra || ''}"></div>
     <div class="f"><label>Lavorazione (min)</label><input id="plv" type="number" min="0" step="1" inputmode="numeric" ${OF} value="${p.lav || ''}"></div></div>
-    <div class="lab" style="margin:8px 0 4px">Piatti / parti da stampare</div><div id="plrows">${(p.piatti || []).map(plRow).join('')}</div>
-    <button class="btn sm" type="button" id="pladd" style="margin-bottom:10px">+ Piatto</button>
     <div class="f"><label>File 3D / profilo (link 3MF, G-code, MakerWorld)</label><div class="row" style="flex-wrap:nowrap"><input id="pfl" class="inp" type="text" ${OF} value="${esc(p.file || '')}" placeholder="https://... oppure nota"><button class="btn sm" type="button" id="pfo">↗</button></div></div>
     <div class="f"><label>Foto</label><input id="pf" type="file" accept="image/*"></div>
     <div class="f"><label>Note</label><input id="pno" type="text" ${OF} value="${esc(p.note)}"></div>
@@ -749,8 +763,6 @@ function printSheet(p, isNew) {
         const b = e.target.closest('[data-a=delrow]'); if (b) { if ($$('.crow', el).length > 1) b.closest('.crow').remove(); else { $('.cname', el).value = ''; $('.cname', el).dataset.fid = ''; $('.cg', el).value = ''; } upd(); }
         const pc = e.target.closest('[data-pp]'); if (pc) { pid = pc.dataset.pp; $('#ppr', el).innerHTML = prChips(pid, 'data-pp'); upd(); }
       });
-      $('#pladd', el).onclick = () => { $('#plrows', el).insertAdjacentHTML('beforeend', plRow('Piatto ' + ($$('.ppn', el).length + 1))); const l = $$('.ppn', el).pop(); l.focus(); l.select(); };
-      el.addEventListener('click', e => { const b = e.target.closest('[data-a=delpl]'); if (b) b.closest('.plr').remove(); });
       $('#pfo', el).onclick = () => { const v = $('#pfl', el).value.trim(); if (/^https?:\/\//i.test(v)) openUrl(v); else toast('Inserisci un link che inizia con https://'); };
       $('#pf', el).onchange = async e => { const f = e.target.files[0]; if (f) { photo = await compress(f); photoChanged = true; showPh(); } };
     },
@@ -759,8 +771,8 @@ function printSheet(p, isNew) {
       Object.assign(p, {
         nome, prezzo: num($('#pp', el).value), scorta: Math.max(0, Math.round(num($('#ps', el).value))),
         minuti: Math.round(num($('#ph', el).value) * 60 + num($('#pm', el).value)), note: $('#pno', el).value.trim(), pid,
-        extra: num($('#pex', el).value), lav: num($('#plv', el).value), piatti: $$('.ppn', el).map(x => x.value.trim()).filter(Boolean), file: $('#pfl', el).value.trim(),
-        colori: readRows($('#crows', el)).filter(r => r.name || num(r.g) > 0 || r.mm > 0).map(r => ({ fid: r.fid, nome: r.name || (fil(r.fid) ? fname(fil(r.fid)) : ''), g: num(r.g), m: r.mm || 0 })),
+        extra: num($('#pex', el).value), lav: num($('#plv', el).value), file: $('#pfl', el).value.trim(),
+        colori: readRows($('#crows', el)).filter(r => r.name || num(r.g) > 0 || r.mm > 0).map(r => ({ fid: r.fid, nome: r.name || (fil(r.fid) ? fname(fil(r.fid)) : ''), g: num(r.g), m: r.mm || 0, piatto: r.pt || '' })),
       });
       if (photoChanged) {
         p.fu = Date.now(); p.foto = photo ? 1 : 0;
@@ -768,7 +780,7 @@ function printSheet(p, isNew) {
         jset(PH, PHOTOS);
       }
       if (!S.prints.includes(p)) S.prints.push(p);
-      touch('prints', p); render();
+      touch('prints', p); ensureQueue(p); render();
     },
   });
 }
@@ -891,7 +903,7 @@ function viewQueue() {
     return `<div class="qi${dn ? ' dn' : ''}"><div class="qh"><input type="checkbox" class="qc" data-a="qall" data-id="${q.id}" ${dn ? 'checked' : ''}>
       <div class="qn">${esc(q.nome)}<small>${n}/${q.pl.length} piatti${q.pid ? ' · da oggetto salvato' : ''}</small></div>
       <div class="qs"><button data-a="qn" data-id="${q.id}" data-d="-1">−</button><button data-a="qn" data-id="${q.id}" data-d="1">+</button><button data-a="qdel" data-id="${q.id}" aria-label="Elimina">🗑</button></div></div>
-      <div class="qp">${q.pl.map((x, i) => `<label class="${x ? 'on' : ''}"><input type="checkbox" data-a="qpl" data-id="${q.id}" data-i="${i}" ${x ? 'checked' : ''}>${esc((q.pn || [])[i] || 'Piatto ' + (i + 1))}</label>`).join('')}</div></div>`;
+      <div class="qp">${q.pl.map((x, i) => `<label class="${x ? 'on' : ''}"><input type="checkbox" data-a="qpl" data-id="${q.id}" data-i="${i}" ${x ? 'checked' : ''}><span>${esc((q.pn || [])[i] || 'Piatto ' + (i + 1))}${((q.pc || [])[i] || []).length ? `<small>${q.pc[i].map(c => `<i class="cd" style="background:${esc(c.h || '#999')}"></i>${esc(c.n)}`).join(' ')}</small>` : ''}</span></label>`).join('')}</div></div>`;
   };
   const bbc = BBP() && bbCfg().dev ? `<div class="qi" id="bbcard" style="margin-bottom:10px">${bbCardInner()}</div>` : '';
   return `${bbc}<div class="stats" style="grid-template-columns:repeat(2,1fr)"><div class="stat"><b>${todo.length}</b><span>Da stampare</span></div><div class="stat"><b>${miss}</b><span>Piatti mancanti</span></div></div>
@@ -905,20 +917,22 @@ function queueSheet() {
     <div class="f" id="qnw"><label>Numero di piatti</label><input id="qpn" type="number" min="1" step="1" inputmode="numeric" ${OF} value="1"></div>`;
   openSheet('Aggiungi in coda', body, { label: 'Aggiungi', init: el => {
     const inp = $('#qnm', el), show = () => {
-      const has = pr && (pr.piatti || []).length;
-      $('#qplw', el).hidden = !has; $('#qnw', el).hidden = !!has;
-      $('#qpls', el).innerHTML = has ? pr.piatti.map((n, i) => `<label class="row" style="font-size:.92rem;padding:4px 0"><input type="checkbox" class="qpk" data-i="${i}" checked style="width:20px;height:20px"> ${esc(n)}</label>`).join('') : '';
+      const pl = pr ? platesOf(pr) : [], has = pl.length > 0;
+      $('#qplw', el).hidden = !has; $('#qnw', el).hidden = has;
+      $('#qpls', el).innerHTML = has ? pl.map((x, i) => `<label class="row" style="font-size:.92rem;padding:4px 0"><input type="checkbox" class="qpk" data-i="${i}" checked style="width:20px;height:20px"> <span>${esc(x.name)}<small style="display:block;color:#6b7280">${x.colors.map(c => esc(c.n)).join(', ')}</small></span></label>`).join('') : '';
     };
-    attachAC(inp, q => list('prints').filter(p => !q || p.nome.toLowerCase().includes(q.toLowerCase())).sort((a, b) => a.nome.localeCompare(b.nome)).map(p => ({ label: p.nome, sub: (p.piatti || []).length ? p.piatti.length + ' piatti' : '', p })), it => { inp.value = it.label; pr = it.p; show(); (pr.piatti || []).length ? 0 : $('#qpn', el).focus(); });
+    attachAC(inp, q => list('prints').filter(p => !q || p.nome.toLowerCase().includes(q.toLowerCase())).sort((a, b) => a.nome.localeCompare(b.nome)).map(p => ({ label: p.nome, sub: platesOf(p).length ? platesOf(p).length + ' piatti' : '', p })), it => { inp.value = it.label; pr = it.p; show(); platesOf(pr).length ? 0 : $('#qpn', el).focus(); });
     inp.addEventListener('input', () => { if (pr && pr.nome !== inp.value.trim()) { pr = null; show(); } });
   }, save: el => {
     const nome = $('#qnm', el).value.trim(); if (!nome) { toast('Scrivi cosa stampare'); return false; }
     if (!pr) pr = list('prints').find(x => x.nome.toLowerCase() === nome.toLowerCase()) || null;
-    let pn;
-    if (pr && (pr.piatti || []).length && !$('#qplw', el).hidden) { pn = $$('.qpk', el).filter(c => c.checked).map(c => pr.piatti[+c.dataset.i]); if (!pn.length) { toast('Seleziona almeno una parte'); return false; } }
-    else if (pr && (pr.piatti || []).length) pn = pr.piatti.slice();
-    else { const n = Math.max(1, Math.min(50, Math.round(num($('#qpn', el).value) || 1))); pn = Array.from({ length: n }, (_, i) => 'Piatto ' + (i + 1)); }
-    const q = { id: uid(), nome, pid: pr ? pr.id : '', pl: pn.map(() => 0), pn }; S.queue.push(q); touch('queue', q); render();
+    let sel;
+    const all = pr ? platesOf(pr) : [];
+    if (all.length && !$('#qplw', el).hidden) { sel = $$('.qpk', el).filter(c => c.checked).map(c => all[+c.dataset.i]); if (!sel.length) { toast('Seleziona almeno una parte'); return false; } }
+    else if (all.length) sel = all;
+    else { const n = Math.max(1, Math.min(50, Math.round(num($('#qpn', el).value) || 1))); sel = Array.from({ length: n }, (_, i) => ({ name: 'Piatto ' + (i + 1), colors: [] })); }
+    const pn = sel.map(x => x.name);
+    const q = { id: uid(), nome, pid: pr ? pr.id : '', pl: pn.map(() => 0), pn, pc: sel.map(x => x.colors) }; S.queue.push(q); touch('queue', q); render();
   } });
 }
 
@@ -968,7 +982,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v3.4</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v3.5</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
@@ -1123,7 +1137,7 @@ function stepFil(id, k, d) { const f = fil(id); f[k] = Math.max(0, (f[k] || 0) +
 function stepPrint(id, d) {
   const p = list('prints').find(x => x.id === id), prev = []; let used = 0;
   if (d > 0) for (const c of p.colori || []) { const f = fil(c.fid); if (f && num(c.g) > 0) { prev.push(JSON.stringify(f)); used += num(c.g); consume(f, num(c.g)); touch('filaments', f); } }
-  const was = p.scorta || 0; p.scorta = Math.max(0, was + d); touch('prints', p); render();
+  const was = p.scorta || 0; p.scorta = Math.max(0, was + d); touch('prints', p); ensureQueue(p); render();
   toast(d > 0 ? (used ? `+1 ${p.nome} · scalati ${Math.round(used)} g` : `+1 ${p.nome}`) : `−1 ${p.nome}`, () => {
     p.scorta = was; touch('prints', p);
     prev.forEach(j => { const o = JSON.parse(j), f = fil(o.id); Object.assign(f, o); touch('filaments', f); }); render();
@@ -1191,6 +1205,7 @@ document.addEventListener('input', e => {
   if (e.target.id === 'q') { V.q = e.target.value; const p = e.target.selectionStart; render(); const q = $('#q'); q.focus(); q.setSelectionRange(p, p); }
   if (e.target.id === 'pq') { V.pq = e.target.value; const p = e.target.selectionStart; render(); const q = $('#pq'); q.focus(); q.setSelectionRange(p, p); }
 });
+if (!S.meta.mig3) { S.meta.mig3 = 1; list('prints').forEach(ensureQueue); save(); }
 render();
 if (cfgOK()) syncNow();
 setTimeout(() => refreshPrices(), 2500);
