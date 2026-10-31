@@ -175,3 +175,8 @@ body.kbopen #tabs,body.kbopen #fab{display:none}
 }
 .cd{display:inline-block;width:9px;height:9px;border-radius:50%;border:1px solid #0003;margin:0 3px 0 4px;vertical-align:middle}.qp label small{display:block;font-size:.7rem;color:#6b7280;font-weight:500}
 .ctm .cpt{padding:7px 8px}
+
+[hidden]{display:none!important}
+.qp{display:grid!important;gap:8px}.qpl{background:#f1f5f9;border-radius:12px;padding:8px 10px}.qpl.on{background:#d1fae5}
+.qpl label{display:flex;align-items:center;gap:8px;font-size:.92rem}.qcs{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 0 30px;font-size:.78rem;color:#4b5563}
+.qcc a{color:#059669;font-weight:700;margin-left:4px}.qcb{background:#fff7ed;color:#9a3412;font-weight:700}
