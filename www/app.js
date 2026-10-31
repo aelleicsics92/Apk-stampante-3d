@@ -498,7 +498,11 @@ function viewPrint() {
 }
 function platesOf(p) {
   const m = new Map();
-  for (const c of p.colori || []) { const n = (c.piatto || '').trim() || 'Piatto 1'; if (!m.has(n)) m.set(n, []); if (c.nome) m.get(n).push({ n: c.nome, h: hexOf(c) }); }
+  (p.colori || []).forEach((c, i) => {
+    const n = (c.piatto || '').trim() || 'Piatto ' + (i + 1);
+    if (!m.has(n)) m.set(n, []);
+    if (c.nome) m.get(n).push({ n: c.nome, h: hexOf(c) });
+  });
   if (!m.size) (p.piatti || []).forEach(n => m.set(n, []));
   return [...m].map(([name, colors]) => ({ name, colors }));
 }
@@ -982,7 +986,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v3.5</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v3.6</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
@@ -1206,6 +1210,7 @@ document.addEventListener('input', e => {
   if (e.target.id === 'pq') { V.pq = e.target.value; const p = e.target.selectionStart; render(); const q = $('#pq'); q.focus(); q.setSelectionRange(p, p); }
 });
 if (!S.meta.mig3) { S.meta.mig3 = 1; list('prints').forEach(ensureQueue); save(); }
+if (!S.meta.mig4) { S.meta.mig4 = 1; S.queue.filter(q => !q.d && q.id.startsWith('auto_') && !q.pl.some(Boolean)).forEach(q => { const p = list('prints').find(x => x.id === q.pid); if (p) { q.d = 1; ensureQueue(p); } }); save(); }
 render();
 if (cfgOK()) syncNow();
 setTimeout(() => refreshPrices(), 2500);
