@@ -555,6 +555,32 @@ function qTick(q, i, fromPick) {
   }
   qApply(q, i); render();
 }
+function qFail(q, i) {
+  const ents = (q.pc || [])[i] || [], tot0 = ents.reduce((a, e) => a + (e.g || 0), 0);
+  const asg = ents.filter(e => e.fid && e.g > 0);
+  let bp = 0; if (BBS && BBS.st && BBS.st.mc_percent && ['FAILED', 'PAUSE', 'RUNNING'].includes(BBS.st.gcode_state)) bp = Math.round(+BBS.st.mc_percent);
+  const body = `<p class="hint" style="margin:0 0 8px">${esc((q.pn || [])[i] || 'Piatto ' + (i + 1))} · peso previsto ${Math.round(tot0)} g${bp ? ` · stampante: ${bp}%` : ''}</p>
+    <div class="g2"><div class="f"><label>% completata</label><input id="fp" type="number" min="0" max="100" step="1" inputmode="numeric" ${OF} value="${bp || ''}"></div>
+    <div class="f"><label>Grammi usati (stima)</label><input id="fg" type="number" min="0" step="any" inputmode="decimal" ${OF}></div></div>
+    <p class="hint" id="fh" style="margin:4px 0 0"></p>
+    ${asg.length ? '' : '<p class="hint" style="color:#b45309">Nessun colore assegnato: scegli prima il colore nel piatto, altrimenti i grammi non vengono scalati.</p>'}
+    <p class="hint">Per più precisione pesa la bobina e correggi il residuo in Magazzino.</p>`;
+  openSheet('Piatto fallito', body, { label: 'Scala i grammi', init: el => {
+    const pc = $('#fp', el), gr = $('#fg', el);
+    pc.addEventListener('input', () => { gr.value = Math.round(tot0 * Math.min(100, num(pc.value)) / 100 * 10) / 10 || ''; });
+    if (bp) pc.dispatchEvent(new Event('input'));
+  }, save: el => {
+    const pct = Math.min(100, num($('#fp', el).value)), g = num($('#fg', el).value);
+    if (!(g > 0)) { toast('Inserisci % o grammi'); return false; }
+    const done = [];
+    for (const e of ents) { const f = e.fid && fil(e.fid); if (!f || !(e.g > 0) || !(tot0 > 0)) continue; const share = g * e.g / tot0; done.push(qDelta(f, () => consume(f, share))); touch('filaments', f); }
+    q.fl = q.fl || []; (q.fl[i] = q.fl[i] || []).push({ pct, g: Math.round(g * 10) / 10, cn: done, t: Date.now() }); touch('queue', q); render();
+    toast(done.length ? `Scalati ${Math.round(g)} g, piatto da rifare` : 'Registrato (nessun colore: grammi non scalati)', () => {
+      for (const d of done) { const f = fil(d.fid); if (f) { f.nuove = Math.max(0, f.nuove - d.dn); f.usate = Math.max(0, f.usate - d.du); f.residuo = Math.max(0, f.residuo - d.dr); touch('filaments', f); } }
+      q.fl[i].pop(); touch('queue', q); render();
+    });
+  } });
+}
 function qChoose(q, i, j) {
   const e = q.pc[i][j];
   colorPicker((q.pn || [])[i] || 'Piatto ' + (i + 1), e.g, f => { if (f) { e.fid = f.id; e.n = fname(f); e.h = f.hex; e.skip = 0; } else e.skip = 1; touch('queue', q); render(); });
@@ -966,7 +992,7 @@ function viewQueue() {
       <div class="qn">${esc(q.nome)}<small>${n}/${q.pl.length} piatti${(() => { const t = q.pl.reduce((a, x, i) => a + (x ? 0 : qMin(q, i)), 0); return t ? ' · ⏱ ' + fmtT(t) + ' da stampare' : ''; })()}</small></div>
       <div class="qs"><button data-a="qn" data-id="${q.id}" data-d="-1">−</button><button data-a="qn" data-id="${q.id}" data-d="1">+</button><button data-a="qdel" data-id="${q.id}" aria-label="Elimina">🗑</button></div></div>
       <div class="qp">${q.pl.map((x, i) => `<div class="qpl ${x ? 'on' : ''}"><label><input type="checkbox" data-a="qpl" data-id="${q.id}" data-i="${i}" ${x ? 'checked' : ''}><b>${esc((q.pn || [])[i] || 'Piatto ' + (i + 1))}</b>${qMin(q, i) ? `<span class="small" style="margin-left:auto">⏱ ${fmtT(qMin(q, i))}</span>` : ''}</label>
-        <div class="qcs">${(((q.pc || [])[i]) || []).map((c, j) => c.fid ? `<span class="qcc"><i class="cd" style="background:${esc(c.h || '#999')}"></i>${esc(c.n)}${c.g ? ` · ${Math.round(c.g)} g` : ''}${x ? '' : ` <a data-a="qcol" data-id="${q.id}" data-i="${i}" data-j="${j}">cambia</a>`}</span>` : c.skip ? `<span class="qcc">senza scalare ${x ? '' : `<a data-a="qcol" data-id="${q.id}" data-i="${i}" data-j="${j}">scegli</a>`}</span>` : `<button class="chip qcb" data-a="qcol" data-id="${q.id}" data-i="${i}" data-j="${j}">🎨 ${c.n ? esc(c.n) : 'Scegli colore'}${c.g ? ' · ' + Math.round(c.g) + ' g' : ''}</button>`).join('')}</div></div>`).join('')}</div></div>`;
+        <div class="qcs">${(((q.pc || [])[i]) || []).map((c, j) => c.fid ? `<span class="qcc"><i class="cd" style="background:${esc(c.h || '#999')}"></i>${esc(c.n)}${c.g ? ` · ${Math.round(c.g)} g` : ''}${x ? '' : ` <a data-a="qcol" data-id="${q.id}" data-i="${i}" data-j="${j}">cambia</a>`}</span>` : c.skip ? `<span class="qcc">senza scalare ${x ? '' : `<a data-a="qcol" data-id="${q.id}" data-i="${i}" data-j="${j}">scegli</a>`}</span>` : `<button class="chip qcb" data-a="qcol" data-id="${q.id}" data-i="${i}" data-j="${j}">🎨 ${c.n ? esc(c.n) : 'Scegli colore'}${c.g ? ' · ' + Math.round(c.g) + ' g' : ''}</button>`).join('')}${x ? '' : `<button class="chip qfb" data-a="qfail" data-id="${q.id}" data-i="${i}">⚠ Fallito</button>`}${((q.fl || [])[i] || []).length ? `<span class="qcc" style="color:#b45309">⚠ ${q.fl[i].length} fallit${q.fl[i].length > 1 ? 'i' : 'o'} · ${Math.round(q.fl[i].reduce((a, f) => a + f.g, 0))} g persi</span>` : ''}</div></div>`).join('')}</div></div>`;
   };
   const bbc = BBP() && bbCfg().dev ? `<div class="qi" id="bbcard" style="margin-bottom:10px">${bbCardInner()}</div>` : '';
   return `${bbc}<div class="stats" style="grid-template-columns:repeat(2,1fr)"><div class="stat"><b>${todo.length}</b><span>Da stampare</span></div><div class="stat"><b>${miss}</b><span>Piatti mancanti</span></div></div>
@@ -1044,7 +1070,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v3.9</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v4.0</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
@@ -1240,6 +1266,7 @@ document.addEventListener('click', e => {
     if (act === 'bbdone') { const q = S.queue.find(x => x.id === id); if (q) { jset(BBD, bbKey()); if (!q.pl[+a.dataset.i]) qTick(q, +a.dataset.i); } return; }
     if (act === 'bbpick') { bbPickSheet(); return; }
     if (act === 'qpl') { const q = S.queue.find(x => x.id === id); if (q) { e.preventDefault(); qTick(q, +a.dataset.i); } return; }
+    if (act === 'qfail') { const q = S.queue.find(x => x.id === id); if (q) qFail(q, +a.dataset.i); return; }
     if (act === 'qcol') { const q = S.queue.find(x => x.id === id); if (q) qChoose(q, +a.dataset.i, +a.dataset.j); return; }
     if (act === 'qall') { const q = S.queue.find(x => x.id === id); if (q) { e.preventDefault(); const all = q.pl.every(Boolean); let miss = 0; q.pl.forEach((x, i) => { if (all) qUndo(q, i); else if (!x) miss += qApply(q, i); }); touch('queue', q); render(); if (miss) toast('Colori non assegnati: grammi non scalati'); } return; }
     if (act === 'qn') { const q = S.queue.find(x => x.id === id); if (q) { const d = +a.dataset.d; if (d > 0) { q.pl.push(0); (q.pn = q.pn || [])[q.pl.length - 1] = 'Piatto ' + q.pl.length; } else if (q.pl.length > 1) { q.pl.pop(); if (q.pn) q.pn.length = q.pl.length; } touch('queue', q); render(); } return; }
