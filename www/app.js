@@ -525,7 +525,7 @@ function qApply(q, i) { // segna fatto: scala i filamenti assegnati; ritorna i g
 function qUndo(q, i) {
   for (const d of (q.cn || [])[i] || []) { const f = fil(d.fid); if (f) { f.nuove = Math.max(0, f.nuove - d.dn); f.usate = Math.max(0, f.usate - d.du); f.residuo = Math.max(0, f.residuo - d.dr); touch('filaments', f); } }
   if (q.cn) q.cn[i] = [];
-  q.pl[i] = 0;
+  q.pl[i] = 0; q.d = 0;
   if (q.sc) { const o = list('prints').find(x => x.id === q.pid); if (o) { o.scorta = Math.max(0, (o.scorta || 0) - 1); touch('prints', o); } q.sc = 0; }
   touch('queue', q);
 }
@@ -553,7 +553,10 @@ function qTick(q, i, fromPick) {
     colorPicker((q.pn || [])[i] || 'Piatto ' + (i + 1), e.g, f => { if (f) { e.fid = f.id; e.n = fname(f); e.h = f.hex; } else e.skip = 1; touch('queue', q); qTick(q, i, 1); });
     return;
   }
-  qApply(q, i); render();
+  const miss = qApply(q, i);
+  if (q.pl.every(Boolean)) { q.d = 1; touch('queue', q); }
+  render();
+  toast(q.pl.every(Boolean) ? (q.sc ? `${q.nome} completato: +1 in magazzino` : `${q.nome} completato`) : 'Piatto fatto' + (miss ? ' (colore non assegnato)' : ''), () => { qUndo(q, i); render(); });
 }
 function qFail(q, i) {
   const ents = (q.pc || [])[i] || [], tot0 = ents.reduce((a, e) => a + (e.g || 0), 0);
@@ -585,8 +588,36 @@ function qChoose(q, i, j) {
   const e = q.pc[i][j];
   colorPicker((q.pn || [])[i] || 'Piatto ' + (i + 1), e.g, f => { if (f) { e.fid = f.id; e.n = fname(f); e.h = f.hex; e.skip = 0; } else e.skip = 1; touch('queue', q); render(); });
 }
+function syncQueueFromPrint(p) {
+  if (!p || p.d) return;
+  const pls = platesOf(p);
+  const merge = (nc, oc) => nc.map((c, j) => { const o = (oc || [])[j]; return c.fid || !o || !(o.fid || o.skip) ? { ...c } : { ...c, fid: o.fid, n: o.n, h: o.h, skip: o.skip }; });
+  list('queue').filter(q => q.pid === p.id && !q.pl.every(Boolean)).forEach(q => {
+    const before = JSON.stringify([q.nome, q.pl, q.pn, q.pc]), auto = q.id === 'auto_' + p.id, names = pls.map(x => x.name), on = q.pn || [];
+    const find = (n, i) => { let k = names.indexOf(n); if (k < 0 && i < pls.length && !names.includes(n) && !(auto ? false : false)) k = i; return k; };
+    if (auto) {
+      const op = q.pl.slice(), opn = on.slice(), opc = (q.pc || []).slice(), ocn = (q.cn || []).slice(), ofl = (q.fl || []).slice();
+      const used = new Set(), npl = [], npn = [], npc = [], ncn = [], nfl = [];
+      pls.forEach((x, k) => {
+        let i = opn.indexOf(x.name); if (i < 0 || used.has(i)) { i = k < opn.length && !used.has(k) && !names.includes(opn[k]) ? k : -1; }
+        if (i >= 0) used.add(i);
+        const done = i >= 0 && op[i];
+        npl.push(done ? 1 : 0); npn.push(x.name); npc.push(done ? opc[i] : merge(x.colors, i >= 0 ? opc[i] : null));
+        if (i >= 0) { ncn[k] = ocn[i]; nfl[k] = ofl[i]; }
+      });
+      if (!npl.length) return;
+      Object.assign(q, { nome: p.nome, pl: npl, pn: npn, pc: npc, cn: ncn, fl: nfl });
+    } else {
+      q.pn = on.map((n, i) => { const k = find(n, i); return k >= 0 ? pls[k].name : n; });
+      q.pc = (q.pc || []).map((c, i) => { const k = find(on[i], i); return k >= 0 && !q.pl[i] ? merge(pls[k].colors, c) : c; });
+    }
+    if (JSON.stringify([q.nome, q.pl, q.pn, q.pc]) !== before) touch('queue', q);
+  });
+}
 function ensureQueue(p) {
-  if (!p || p.d || (p.scorta || 0) > 0) return;
+  if (!p || p.d) return;
+  syncQueueFromPrint(p);
+  if ((p.scorta || 0) > 0) return;
   if (list('queue').some(x => x.pid === p.id && x.id !== 'auto_' + p.id && !x.pl.every(Boolean))) return;
   const pl = platesOf(p), pls = pl.length ? pl : [{ name: 'Piatto 1', colors: [] }], id = 'auto_' + p.id;
   let q = S.queue.find(x => x.id === id);
@@ -983,21 +1014,21 @@ function bbPanel() {
 
 /* ---------- coda di stampa ---------- */
 function viewQueue() {
-  const all = list('queue'), isDone = q => q.pl.every(Boolean);
-  const todo = all.filter(q => !isDone(q)), done = all.filter(isDone);
+  const todo = list('queue').filter(q => !q.pl.every(Boolean));
   const miss = todo.reduce((a, q) => a + q.pl.filter(x => !x).length, 0);
   const item = q => {
-    const n = q.pl.filter(Boolean).length, dn = isDone(q);
-    return `<div class="qi${dn ? ' dn' : ''}"><div class="qh"><input type="checkbox" class="qc" data-a="qall" data-id="${q.id}" ${dn ? 'checked' : ''}>
-      <div class="qn">${esc(q.nome)}<small>${n}/${q.pl.length} piatti${(() => { const t = q.pl.reduce((a, x, i) => a + (x ? 0 : qMin(q, i)), 0); return t ? ' · ⏱ ' + fmtT(t) + ' da stampare' : ''; })()}</small></div>
-      <div class="qs"><button data-a="qn" data-id="${q.id}" data-d="-1">−</button><button data-a="qn" data-id="${q.id}" data-d="1">+</button><button data-a="qdel" data-id="${q.id}" aria-label="Elimina">🗑</button></div></div>
-      <div class="qp">${q.pl.map((x, i) => `<div class="qpl ${x ? 'on' : ''}"><label><input type="checkbox" data-a="qpl" data-id="${q.id}" data-i="${i}" ${x ? 'checked' : ''}><b>${esc((q.pn || [])[i] || 'Piatto ' + (i + 1))}</b>${qMin(q, i) ? `<span class="small" style="margin-left:auto">⏱ ${fmtT(qMin(q, i))}</span>` : ''}</label>
-        <div class="qcs">${(((q.pc || [])[i]) || []).map((c, j) => c.fid ? `<span class="qcc"><i class="cd" style="background:${esc(c.h || '#999')}"></i>${esc(c.n)}${c.g ? ` · ${Math.round(c.g)} g` : ''}${x ? '' : ` <a data-a="qcol" data-id="${q.id}" data-i="${i}" data-j="${j}">cambia</a>`}</span>` : c.skip ? `<span class="qcc">senza scalare ${x ? '' : `<a data-a="qcol" data-id="${q.id}" data-i="${i}" data-j="${j}">scegli</a>`}</span>` : `<button class="chip qcb" data-a="qcol" data-id="${q.id}" data-i="${i}" data-j="${j}">🎨 ${c.n ? esc(c.n) : 'Scegli colore'}${c.g ? ' · ' + Math.round(c.g) + ' g' : ''}</button>`).join('')}${x ? '' : `<button class="chip qfb" data-a="qfail" data-id="${q.id}" data-i="${i}">⚠ Fallito</button>`}${((q.fl || [])[i] || []).length ? `<span class="qcc" style="color:#b45309">⚠ ${q.fl[i].length} fallit${q.fl[i].length > 1 ? 'i' : 'o'} · ${Math.round(q.fl[i].reduce((a, f) => a + f.g, 0))} g persi</span>` : ''}</div></div>`).join('')}</div></div>`;
+    const open = !!(V.qo || {})[q.id], left = q.pl.filter(x => !x).length, t = q.pl.reduce((a, x, i) => a + (x ? 0 : qMin(q, i)), 0);
+    const plate = i => { const x = 0, ents = ((q.pc || [])[i]) || [];
+      return `<div class="qpl"><label><input type="checkbox" data-a="qpl" data-id="${q.id}" data-i="${i}"><b>${esc((q.pn || [])[i] || 'Piatto ' + (i + 1))}</b>${qMin(q, i) ? `<span class="small" style="margin-left:auto">⏱ ${fmtT(qMin(q, i))}</span>` : ''}</label>
+        <div class="qcs">${ents.map((c, j) => c.fid ? `<span class="qcc"><i class="cd" style="background:${esc(c.h || '#999')}"></i>${esc(c.n)}${c.g ? ` · ${Math.round(c.g)} g` : ''} <a data-a="qcol" data-id="${q.id}" data-i="${i}" data-j="${j}">cambia</a></span>` : c.skip ? `<span class="qcc">senza scalare <a data-a="qcol" data-id="${q.id}" data-i="${i}" data-j="${j}">scegli</a></span>` : `<button class="chip qcb" data-a="qcol" data-id="${q.id}" data-i="${i}" data-j="${j}">🎨 ${c.n ? esc(c.n) : 'Scegli colore'}${c.g ? ' · ' + Math.round(c.g) + ' g' : ''}</button>`).join('')}<button class="chip qfb" data-a="qfail" data-id="${q.id}" data-i="${i}">⚠ Fallito</button>${((q.fl || [])[i] || []).length ? `<span class="qcc" style="color:#b45309">⚠ ${q.fl[i].length} fallit${q.fl[i].length > 1 ? 'i' : 'o'} · ${Math.round(q.fl[i].reduce((a, f) => a + f.g, 0))} g persi</span>` : ''}</div></div>`; };
+    return `<div class="qi"><div class="qh" data-a="qtog" data-id="${q.id}"><span class="qarr${open ? ' o' : ''}">▸</span>
+      <div class="qn">${esc(q.nome)}<small>${left} piatt${left > 1 ? 'i rimasti' : 'o rimasto'}${t ? ' · ⏱ ' + fmtT(t) : ''}</small></div>
+      <div class="qs"><button data-a="qdel" data-id="${q.id}" aria-label="Elimina">🗑</button></div></div>
+      ${open ? `<div class="qp">${q.pl.map((x, i) => x ? '' : plate(i)).join('')}<div style="text-align:right"><button class="chip" data-a="qn" data-id="${q.id}" data-d="1">+ piatto</button></div></div>` : ''}</div>`;
   };
   const bbc = BBP() && bbCfg().dev ? `<div class="qi" id="bbcard" style="margin-bottom:10px">${bbCardInner()}</div>` : '';
   return `${bbc}<div class="stats" style="grid-template-columns:repeat(2,1fr)"><div class="stat"><b>${todo.length}</b><span>Da stampare</span></div><div class="stat"><b>${miss}</b><span>Piatti mancanti</span></div></div>
-  <div class="list">${todo.map(item).join('') || '<div class="empty">Coda vuota. Tocca + per aggiungere cosa stampare.</div>'}</div>
-  ${done.length ? `<div class="lab" style="margin:14px 0 6px;display:flex;justify-content:space-between;align-items:center">Completati<button class="chip" data-a="qclear">Rimuovi completati</button></div><div class="list">${done.map(item).join('')}</div>` : ''}`;
+  <div class="list">${todo.map(item).join('') || '<div class="empty">Coda vuota. Tocca + per aggiungere cosa stampare.</div>'}</div>`;
 }
 function queueSheet() {
   let pr = null;
@@ -1070,7 +1101,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v4.0</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v4.1</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
@@ -1268,10 +1299,9 @@ document.addEventListener('click', e => {
     if (act === 'qpl') { const q = S.queue.find(x => x.id === id); if (q) { e.preventDefault(); qTick(q, +a.dataset.i); } return; }
     if (act === 'qfail') { const q = S.queue.find(x => x.id === id); if (q) qFail(q, +a.dataset.i); return; }
     if (act === 'qcol') { const q = S.queue.find(x => x.id === id); if (q) qChoose(q, +a.dataset.i, +a.dataset.j); return; }
-    if (act === 'qall') { const q = S.queue.find(x => x.id === id); if (q) { e.preventDefault(); const all = q.pl.every(Boolean); let miss = 0; q.pl.forEach((x, i) => { if (all) qUndo(q, i); else if (!x) miss += qApply(q, i); }); touch('queue', q); render(); if (miss) toast('Colori non assegnati: grammi non scalati'); } return; }
+    if (act === 'qtog') { V.qo = V.qo || {}; V.qo[id] = !V.qo[id]; render(); return; }
     if (act === 'qn') { const q = S.queue.find(x => x.id === id); if (q) { const d = +a.dataset.d; if (d > 0) { q.pl.push(0); (q.pn = q.pn || [])[q.pl.length - 1] = 'Piatto ' + q.pl.length; } else if (q.pl.length > 1) { q.pl.pop(); if (q.pn) q.pn.length = q.pl.length; } touch('queue', q); render(); } return; }
     if (act === 'qdel') { const q = S.queue.find(x => x.id === id); if (q) { q.d = 1; touch('queue', q); render(); } return; }
-    if (act === 'qclear') { list('queue').filter(q => q.pl.every(Boolean)).forEach(q => { q.d = 1; touch('queue', q); }); render(); return; }
     if (act === 'sync') { if (!cfgOK()) { V.tab = 'set'; render(); } else syncNow(true); return; }
     if (act === 'syncnow') { syncNow(true); return; }
     if (act === 'newcode') { $('#c_code').value = randCode(); $('#c_code').dispatchEvent(new Event('change', { bubbles: true })); return; }
@@ -1297,6 +1327,7 @@ document.addEventListener('input', e => {
 });
 if (!S.meta.mig3) { S.meta.mig3 = 1; list('prints').forEach(ensureQueue); save(); }
 if (!S.meta.mig5) { S.meta.mig5 = 1; S.queue.filter(q => !q.d && q.id.startsWith('auto_') && !q.pl.some(Boolean)).forEach(q => { const p = list('prints').find(x => x.id === q.pid); if (p) { q.d = 1; ensureQueue(p); } }); save(); }
+if (!S.meta.mig6) { S.meta.mig6 = 1; S.queue.filter(q => !q.d && q.pl.length && q.pl.every(Boolean)).forEach(q => { q.d = 1; touch("queue", q); }); save(); }
 if (!S.meta.mig4) { S.meta.mig4 = 1; S.queue.filter(q => !q.d && q.id.startsWith('auto_') && !q.pl.some(Boolean)).forEach(q => { const p = list('prints').find(x => x.id === q.pid); if (p) { q.d = 1; ensureQueue(p); } }); save(); }
 render();
 if (cfgOK()) syncNow();

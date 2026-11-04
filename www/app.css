@@ -181,3 +181,4 @@ body.kbopen #tabs,body.kbopen #fab{display:none}
 .qpl label{display:flex;align-items:center;gap:8px;font-size:.92rem}.qcs{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 0 30px;font-size:.78rem;color:#4b5563}
 .qcc a{color:#059669;font-weight:700;margin-left:4px}.qcb{background:#fff7ed;color:#9a3412;font-weight:700}
 .qfb{background:#fef3c7;color:#92400e;font-weight:700}
+.qh[data-a=qtog]{cursor:pointer}.qarr{display:inline-block;width:20px;font-size:1.1rem;color:#6b7280;transition:transform .15s;flex:none}.qarr.o{transform:rotate(90deg)}
