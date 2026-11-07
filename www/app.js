@@ -836,31 +836,46 @@ function compress(file, max = 320) {
 }
 /* ---------- import .3mf (Bambu Studio) ---------- */
 async function unzipMeta(buf) {
-  const dv = new DataView(buf), u8 = new Uint8Array(buf), out = {};
+  const dv = new DataView(buf), u8 = new Uint8Array(buf), out = {}, names = [];
   let e = u8.length - 22; while (e >= 0 && dv.getUint32(e, true) !== 0x06054b50) e--;
   if (e < 0) throw new Error('zip');
   const n = dv.getUint16(e + 10, true); let p = dv.getUint32(e + 16, true);
+  const inflate = async (data, max) => {
+    const rd = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader(), parts = []; let len = 0;
+    try { while (len < max) { const r = await rd.read(); if (r.done) break; parts.push(r.value); len += r.value.length; } } catch (x) { if (!len) throw x; }
+    try { rd.cancel(); } catch (x) { }
+    const o = new Uint8Array(len); let k = 0; parts.forEach(c => { o.set(c, k); k += c.length; }); return o;
+  };
   for (let i = 0; i < n; i++) {
     const meth = dv.getUint16(p + 10, true), csz = dv.getUint32(p + 20, true), nl = dv.getUint16(p + 28, true), xl = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true), lo = dv.getUint32(p + 42, true);
-    const name = new TextDecoder().decode(u8.subarray(p + 46, p + 46 + nl)); p += 46 + nl + xl + cl;
-    if (!/(^|\/)(slice_info|model_settings)\.config$/.test(name)) continue;
-    const st = lo + 30 + dv.getUint16(lo + 26, true) + dv.getUint16(lo + 28, true), data = u8.slice(st, st + csz);
-    const raw = meth === 0 ? data.buffer : await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer();
-    out[name.split('/').pop()] = new TextDecoder().decode(raw);
+    const name = new TextDecoder().decode(u8.subarray(p + 46, p + 46 + nl)); p += 46 + nl + xl + cl; names.push(name);
+    const base = name.split('/').pop(), gc = /^plate_\d+\.gcode$/.test(base);
+    if (!/^(slice_info|model_settings|project_settings)\.config$/.test(base) && !gc) continue;
+    const st = lo + 30 + dv.getUint16(lo + 26, true) + dv.getUint16(lo + 28, true), data = u8.subarray(st, st + csz);
+    const raw = meth === 0 ? data.subarray(0, gc ? 300000 : csz) : await inflate(data, gc ? 300000 : 1e9);
+    out[base] = new TextDecoder().decode(raw);
   }
-  return out;
+  out._names = names; return out;
 }
+const hmsMin = t => { const m = /(?:(\d+)d)?\s*(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+)s)?/.exec(t || '') || []; return Math.round(((+m[1] || 0) * 86400 + (+m[2] || 0) * 3600 + (+m[3] || 0) * 60 + (+m[4] || 0)) / 60); };
 async function parse3mf(file) {
   const z = await unzipMeta(await file.arrayBuffer()), dp = new DOMParser();
-  if (!z['slice_info.config']) return null;
   const md = (el, k) => { const m = [...el.children].find(x => x.tagName === 'metadata' && x.getAttribute('key') === k); return m ? m.getAttribute('value') : ''; };
   const names = {};
   if (z['model_settings.config']) dp.parseFromString(z['model_settings.config'], 'text/xml').querySelectorAll('plate').forEach(pl => { const n = md(pl, 'plater_name'); if (n) names[md(pl, 'plater_id')] = n; });
-  const plates = [...dp.parseFromString(z['slice_info.config'], 'text/xml').querySelectorAll('plate')].map((pl, i) => {
+  let plates = [];
+  if (z['slice_info.config']) plates = [...dp.parseFromString(z['slice_info.config'], 'text/xml').querySelectorAll('plate')].map((pl, i) => {
     const idx = md(pl, 'index') || String(i + 1);
     return { name: names[idx] || 'Piatto ' + idx, min: Math.round(num(md(pl, 'prediction')) / 60), fil: [...pl.querySelectorAll('filament')].map(f => ({ type: f.getAttribute('type') || '', color: (f.getAttribute('color') || '').slice(0, 7), g: Math.round(num(f.getAttribute('used_g')) * 10) / 10 })).filter(f => f.g > 0) };
   }).filter(p => p.fil.length || p.min);
-  return { name: file.name.replace(/\.3mf$/i, '').replace(/\.gcode$/i, ''), plates };
+  if (!plates.length) { // alternativa: intestazione del gcode dentro il file
+    const ps = z['project_settings.config'] || '', arr = k => { const m = new RegExp('"' + k + '"\\s*:\\s*\\[([^\\]]*)\\]').exec(ps); return m ? m[1].split(',').map(x => x.replace(/["\s]/g, '')) : []; }, ty = arr('filament_type'), co = arr('filament_colour');
+    plates = Object.keys(z).filter(k => /^plate_\d+\.gcode$/.test(k)).sort((a, b) => parseInt(a.slice(6)) - parseInt(b.slice(6))).map(k => {
+      const t = z[k], idx = k.match(/\d+/)[0], tm = /total estimated time:\s*([^\n;]+)/.exec(t) || /model printing time:\s*([^\n;]+)/.exec(t), w = /total filament weight \[g\]\s*:\s*([^\n]+)/.exec(t);
+      return { name: names[idx] || 'Piatto ' + idx, min: hmsMin(tm && tm[1]), fil: (w ? w[1].split(',').map(x => num(x)) : []).map((g, i) => ({ type: ty[i] || '', color: co[i] || '', g: Math.round(g * 10) / 10 })).filter(f => f.g > 0) };
+    }).filter(p => p.fil.length || p.min);
+  }
+  return { name: file.name.replace(/\.3mf$/i, ''), plates, entries: z._names };
 }
 function matchStock(type, hex) {
   const rgb = h => /^#?[0-9a-f]{6}$/i.test(h || '') ? [1, 3, 5].map(i => parseInt(h.replace('#', '').slice(i - 1, i + 1), 16)) : null, a = rgb(hex);
@@ -927,7 +942,7 @@ function printSheet(p, isNew) {
         const f = e.target.files[0]; if (!f) return;
         try {
           const r = await parse3mf(f);
-          if (!r || !r.plates.length) { toast('Nessun dato di slicing: in Bambu Studio fai Slice e salva il progetto'); return; }
+          if (!r.plates.length) { toast('Nessun dato di slicing nel file. Contenuto: ' + r.entries.filter(x => /Metadata\/[^/]+$/.test(x)).map(x => x.split('/').pop()).slice(0, 12).join(', ')); clearTimeout(toastT); toastT = setTimeout(() => $('#toast').className = '', 12000); return; }
           const nn = $('#pn', el); if (!nn.value.trim()) nn.value = r.name;
           const rows = []; r.plates.forEach(pl => pl.fil.forEach((c, k) => { const s = matchStock(c.type, c.color); rows.push({ fid: s ? s.id : '', name: s ? fname(s) : [c.type, c.color].filter(Boolean).join(' '), g: c.g, mm: k ? 0 : pl.min, pt: pl.name, t: 1 }); }));
           $('#crows', el).innerHTML = rows.map(x => rowHtml(x, 1)).join(''); bindRows(el, upd);
@@ -1155,7 +1170,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v4.2</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v4.3</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
