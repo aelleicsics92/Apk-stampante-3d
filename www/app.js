@@ -834,6 +834,45 @@ function compress(file, max = 320) {
     img.onerror = () => res(null); img.src = u;
   });
 }
+/* ---------- import .3mf (Bambu Studio) ---------- */
+async function unzipMeta(buf) {
+  const dv = new DataView(buf), u8 = new Uint8Array(buf), out = {};
+  let e = u8.length - 22; while (e >= 0 && dv.getUint32(e, true) !== 0x06054b50) e--;
+  if (e < 0) throw new Error('zip');
+  const n = dv.getUint16(e + 10, true); let p = dv.getUint32(e + 16, true);
+  for (let i = 0; i < n; i++) {
+    const meth = dv.getUint16(p + 10, true), csz = dv.getUint32(p + 20, true), nl = dv.getUint16(p + 28, true), xl = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true), lo = dv.getUint32(p + 42, true);
+    const name = new TextDecoder().decode(u8.subarray(p + 46, p + 46 + nl)); p += 46 + nl + xl + cl;
+    if (!/(^|\/)(slice_info|model_settings)\.config$/.test(name)) continue;
+    const st = lo + 30 + dv.getUint16(lo + 26, true) + dv.getUint16(lo + 28, true), data = u8.slice(st, st + csz);
+    const raw = meth === 0 ? data.buffer : await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer();
+    out[name.split('/').pop()] = new TextDecoder().decode(raw);
+  }
+  return out;
+}
+async function parse3mf(file) {
+  const z = await unzipMeta(await file.arrayBuffer()), dp = new DOMParser();
+  if (!z['slice_info.config']) return null;
+  const md = (el, k) => { const m = [...el.children].find(x => x.tagName === 'metadata' && x.getAttribute('key') === k); return m ? m.getAttribute('value') : ''; };
+  const names = {};
+  if (z['model_settings.config']) dp.parseFromString(z['model_settings.config'], 'text/xml').querySelectorAll('plate').forEach(pl => { const n = md(pl, 'plater_name'); if (n) names[md(pl, 'plater_id')] = n; });
+  const plates = [...dp.parseFromString(z['slice_info.config'], 'text/xml').querySelectorAll('plate')].map((pl, i) => {
+    const idx = md(pl, 'index') || String(i + 1);
+    return { name: names[idx] || 'Piatto ' + idx, min: Math.round(num(md(pl, 'prediction')) / 60), fil: [...pl.querySelectorAll('filament')].map(f => ({ type: f.getAttribute('type') || '', color: (f.getAttribute('color') || '').slice(0, 7), g: Math.round(num(f.getAttribute('used_g')) * 10) / 10 })).filter(f => f.g > 0) };
+  }).filter(p => p.fil.length || p.min);
+  return { name: file.name.replace(/\.3mf$/i, '').replace(/\.gcode$/i, ''), plates };
+}
+function matchStock(type, hex) {
+  const rgb = h => /^#?[0-9a-f]{6}$/i.test(h || '') ? [1, 3, 5].map(i => parseInt(h.replace('#', '').slice(i - 1, i + 1), 16)) : null, a = rgb(hex);
+  if (!a) return null; let best = null, bd = 1e9;
+  list('filaments').forEach(f => {
+    const b = rgb(f.hex); if (!b) return; const ft = (f.type || '').toLowerCase(), t = (type || '').toLowerCase();
+    if (t && ft && !ft.includes(t.replace(/[^a-z]/g, '')) && !t.includes(ft.split(/[ +]/)[0])) return;
+    const d = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) - (tot(f) > 0 ? 15 : 0);
+    if (d < bd) { bd = d; best = f; }
+  });
+  return bd < 70 ? best : null;
+}
 const plRow = n => `<div class="plr"><input class="inp ppn" type="text" ${OF} placeholder="Nome piatto (es. Corpo)" value="${esc(n)}"><button type="button" data-a="delpl" tabindex="-1">✕</button></div>`;
 function printSheet(p, isNew) {
   isNew = isNew || !p; p = p || { id: uid(), nome: '', prezzo: 0, scorta: 0, minuti: 0, colori: [], note: '', foto: 0, fu: 0 };
@@ -841,6 +880,7 @@ function printSheet(p, isNew) {
   let photo = (PHOTOS[p.id] && PHOTOS[p.id].data) || null, photoChanged = false, pid = p.pid || '';
   const rows = (p.colori && p.colori.length ? p.colori : [{ fid: '', nome: '', g: '' }]).map(c => ({ fid: c.fid, name: c.nome, g: c.g || '', mm: c.m || 0, pt: c.piatto || '', t: 1 }));
   const body = `<div id="pph"></div>
+    <div class="f"><button class="btn sm" type="button" id="p3b" style="width:100%">📂 Importa da .3mf (Bambu Studio)</button><input id="p3f" type="file" accept=".3mf" hidden></div>
     <div class="f"><label>Nome oggetto</label><input id="pn" type="text" ${OF} value="${esc(p.nome)}" placeholder="es. Snoopy"></div>
     <div class="g2"><div class="f"><label>Prezzo vendita €</label><input id="pp" type="number" min="0" step="any" inputmode="decimal" ${OF} value="${p.prezzo || ''}"></div>
     <div class="f"><label>Pezzi in magazzino</label><input id="ps" type="number" min="0" step="1" inputmode="numeric" ${OF} value="${p.scorta || 0}"></div></div>
@@ -882,6 +922,20 @@ function printSheet(p, isNew) {
         const b = e.target.closest('[data-a=delrow]'); if (b) { if ($$('.crow', el).length > 1) b.closest('.crow').remove(); else { $('.cname', el).value = ''; $('.cname', el).dataset.fid = ''; $('.cg', el).value = ''; } upd(); }
         const pc = e.target.closest('[data-pp]'); if (pc) { pid = pc.dataset.pp; $('#ppr', el).innerHTML = prChips(pid, 'data-pp'); upd(); }
       });
+      $('#p3b', el).onclick = () => $('#p3f', el).click();
+      $('#p3f', el).onchange = async e => {
+        const f = e.target.files[0]; if (!f) return;
+        try {
+          const r = await parse3mf(f);
+          if (!r || !r.plates.length) { toast('Nessun dato di slicing: in Bambu Studio fai Slice e salva il progetto'); return; }
+          const nn = $('#pn', el); if (!nn.value.trim()) nn.value = r.name;
+          const rows = []; r.plates.forEach(pl => pl.fil.forEach((c, k) => { const s = matchStock(c.type, c.color); rows.push({ fid: s ? s.id : '', name: s ? fname(s) : [c.type, c.color].filter(Boolean).join(' '), g: c.g, mm: k ? 0 : pl.min, pt: pl.name, t: 1 }); }));
+          $('#crows', el).innerHTML = rows.map(x => rowHtml(x, 1)).join(''); bindRows(el, upd);
+          const t = r.plates.reduce((a, x) => a + x.min, 0); $('#ph', el).value = Math.floor(t / 60) || ''; $('#pm', el).value = t % 60 || '';
+          upd(); toast(`Importati ${r.plates.length} piatti`);
+        } catch (err) { toast('File .3mf non leggibile'); }
+        e.target.value = '';
+      };
       $('#pfo', el).onclick = () => { const v = $('#pfl', el).value.trim(); if (/^https?:\/\//i.test(v)) openUrl(v); else toast('Inserisci un link che inizia con https://'); };
       $('#pf', el).onchange = async e => { const f = e.target.files[0]; if (f) { photo = await compress(f); photoChanged = true; showPh(); } };
     },
@@ -1101,7 +1155,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v4.1</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v4.2</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
