@@ -1170,7 +1170,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v4.3</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v4.4</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
@@ -1407,7 +1407,15 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 document.addEventListener('focusin', e => {
   if (!e.target.matches('input:not([type=range]):not([type=checkbox]):not([type=file]),textarea')) return;
   document.body.classList.add('kb');
-  setTimeout(() => { try { e.target.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (x) { } }, 320);
+  setTimeout(() => { try {
+    const t = e.target, r = t.getBoundingClientRect(), vh = (window.visualViewport || {}).height || innerHeight;
+    if (r.top < 60 || r.bottom > vh - 20) t.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  } catch (x) { } }, 320);
+});
+document.addEventListener('click', e => {
+  const t = e.target; if (!t.matches || !t.matches('input:not([type=range]):not([type=checkbox]):not([type=radio]):not([type=file]):not([type=color]):not([type=button]),textarea')) return;
+  if (t.matches('input.search') && t.value) { t.value = ''; t.dispatchEvent(new Event('input', { bubbles: true })); return; }
+  try { t.select(); } catch (x) { }
 });
 document.addEventListener('focusout', () => setTimeout(() => { if (!document.activeElement || !document.activeElement.matches('input,textarea')) document.body.classList.remove('kb'); }, 250));
 
