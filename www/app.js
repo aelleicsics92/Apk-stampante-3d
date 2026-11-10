@@ -928,7 +928,9 @@ function printSheet(p, isNew) {
       const showPh = () => { $('#pph', el).innerHTML = photo ? `<img class="photo" src="${photo}" alt=""><button class="btn sm danger" type="button" id="prm" style="margin-bottom:8px">Rimuovi foto</button>` : ''; const r = $('#prm', el); if (r) r.onclick = () => { photo = null; photoChanged = true; showPh(); }; };
       showPh();
       const cpv = (p.cp || []).map(x => (x || []).map(c => c.n).join(' + '));
-      const drawCp = () => { const n = Math.max(0, Math.round(num($('#ps', el).value))); $('#pcp', el).innerHTML = n ? `<div class="lab" style="margin:4px 0">Colore di ogni copia in magazzino</div>` + Array.from({ length: n }, (_, i) => `<div class="f" style="margin-bottom:6px"><input class="inp cpi" type="text" ${OF} autocomplete="off" placeholder="Copia ${i + 1}: colore (es. Giallo)" value="${esc(cpv[i] || '')}"></div>`).join('') : ''; };
+      let drawCp = () => { const n = Math.max(0, Math.round(num($('#ps', el).value))); $('#pcp', el).innerHTML = n ? `<div class="lab" style="margin:4px 0">Colore di ogni copia in magazzino</div>` + Array.from({ length: n }, (_, i) => `<div class="f" style="margin-bottom:6px"><input class="inp cpi" type="text" ${OF} autocomplete="off" placeholder="Copia ${i + 1}: colore (es. Giallo)" value="${esc(cpv[i] || '')}"></div>`).join('') : ''; };
+      const acCp = () => $$('.cpi', el).forEach(inp => attachAC(inp, q => { const seg = q.split(/\s*[+,]\s*/).pop().toLowerCase(); return list('filaments').filter(f => !seg || fname(f).toLowerCase().includes(seg)).sort((a, b) => (tot(b) > 0) - (tot(a) > 0) || fname(a).localeCompare(fname(b))).slice(0, 12).map(f => ({ label: fname(f), sub: tot(f) + ' bob.' })); }, it => { const parts = inp.value.split(/(\s*[+,]\s*)/); parts[parts.length - 1] = it.label; inp.value = parts.join(''); }));
+      const drawCp0 = drawCp; drawCp = () => { drawCp0(); acCp(); };
       drawCp(); $('#ps', el).addEventListener('input', () => { $$('.cpi', el).forEach((x, i) => cpv[i] = x.value); drawCp(); });
       const upd = () => {
         const m = num($('#ph', el).value) * 60 + num($('#pm', el).value), r = readRows($('#crows', el));
@@ -977,7 +979,7 @@ function printSheet(p, isNew) {
         if (photo) { PHOTOS[p.id] = { fu: p.fu, data: photo }; S.meta.photoDirty[p.id] = 1; } else { delete PHOTOS[p.id]; S.meta.photoDirty[p.id] = -1; }
         jset(PH, PHOTOS);
       }
-      { const old = p.cp || []; p.cp = $$('.cpi', el).map((x, i) => { const t = x.value.trim(); if (!t) return []; const prev = old[i] || []; return t.split(/\s*[+,]\s*/).filter(Boolean).map(n => { const o = prev.find(c => c.n === n); return o || { n, h: (list('filaments').find(f => fname(f).toLowerCase() === n.toLowerCase()) || {}).hex || '' }; }); }); }
+      { const old = p.cp || []; p.cp = $$('.cpi', el).map((x, i) => { const t = x.value.trim(); if (!t) return []; const prev = old[i] || []; return t.split(/\s*[+,]\s*/).filter(Boolean).map(n => { const o = prev.find(c => c.n === n); if (o) return o; const L = n.toLowerCase(), fs = list('filaments'), f = fs.find(f => fname(f).toLowerCase() === L) || (fs.filter(f => (f.color || '').toLowerCase() === L).length === 1 ? fs.find(f => (f.color || '').toLowerCase() === L) : null); return f ? { n: fname(f), h: f.hex || '' } : { n, h: '' }; }); }); }
       if (!S.prints.includes(p)) S.prints.push(p);
       touch('prints', p); ensureQueue(p); render();
     },
@@ -1181,7 +1183,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v4.5</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v4.6</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
