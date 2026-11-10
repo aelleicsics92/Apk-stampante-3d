@@ -478,7 +478,7 @@ function sellSheet(p) {
     const o = pr && list('prints').find(x => x.id === pr.id), has = o && (printGrams(o) > 0 || o.minuti > 0);
     const rec = { id: uid(), pid: o ? o.id : '', nome, qty: q, prezzo, costo: has ? Math.round(printCalc(o).tot * 100) / 100 : 0, data };
     S.sales.push(rec); touch('sales', rec);
-    if (o && $('#svs', el).checked && o.scorta > 0) { o.scorta = Math.max(0, o.scorta - q); touch('prints', o); ensureQueue(o); }
+    if (o && $('#svs', el).checked && o.scorta > 0) { o.scorta = Math.max(0, o.scorta - q); (o.cp = o.cp || []).splice(0, q); touch('prints', o); ensureQueue(o); }
     toast('Vendita registrata'); render();
   } });
 }
@@ -522,17 +522,22 @@ function qApply(q, i) { // segna fatto: scala i filamenti assegnati; ritorna i g
   }
   q.pl[i] = 1; touch('queue', q); qCompleted(q); return miss;
 }
+function qCopyColors(q) {
+  const seen = new Set(), out = [];
+  (q.pc || []).forEach(pl => (pl || []).forEach(c => { const f = c.fid && fil(c.fid), n = f ? fname(f) : (c.skip ? '' : c.n); if (!n || seen.has(n)) return; seen.add(n); out.push({ n, h: f ? f.hex : (c.h || '') }); }));
+  return out;
+}
 function qUndo(q, i) {
   for (const d of (q.cn || [])[i] || []) { const f = fil(d.fid); if (f) { f.nuove = Math.max(0, f.nuove - d.dn); f.usate = Math.max(0, f.usate - d.du); f.residuo = Math.max(0, f.residuo - d.dr); touch('filaments', f); } }
   if (q.cn) q.cn[i] = [];
   q.pl[i] = 0; q.d = 0;
-  if (q.sc) { const o = list('prints').find(x => x.id === q.pid); if (o) { o.scorta = Math.max(0, (o.scorta || 0) - 1); touch('prints', o); } q.sc = 0; }
+  if (q.sc) { const o = list('prints').find(x => x.id === q.pid); if (o) { o.scorta = Math.max(0, (o.scorta || 0) - 1); (o.cp = o.cp || []).pop(); touch('prints', o); } q.sc = 0; }
   touch('queue', q);
 }
 function qCompleted(q) {
   if (!q.pid || q.sc || !q.pl.every(Boolean)) return;
   const o = list('prints').find(x => x.id === q.pid); if (!o) return;
-  o.scorta = (o.scorta || 0) + 1; touch('prints', o); q.sc = 1; toast(`${o.nome} completato: +1 in magazzino`);
+  o.scorta = (o.scorta || 0) + 1; (o.cp = o.cp || []).push(qCopyColors(q)); touch('prints', o); q.sc = 1; toast(`${o.nome} completato: +1 in magazzino`);
 }
 function colorPicker(title, g, cb) {
   const body = `<div class="f"><input id="cpq" type="text" ${OF} autocomplete="off" placeholder="Cerca marca, tipo o colore"></div><div id="cpl"></div><button class="btn ghost" id="cps" style="width:100%;margin-top:8px">Non scalare dal magazzino</button>`;
@@ -635,6 +640,7 @@ function printCard(p) {
       <div class="ti"><div class="name">${esc(p.nome)}</div><div class="small">${p.minuti ? '⏱ ' + fmtT(p.minuti) : ''}${p.minuti && g ? ' · ' : ''}${g ? '⚖ ' + Math.round(g) + ' g' : ''}${(() => { const np = new Set((p.colori || []).map(c => c.piatto).filter(Boolean)).size || (p.piatti || []).length; return np ? ' · 🍽 ' + np + ' piatti' : ''; })()}${!has ? 'ore e grammi da inserire' : ''}</div></div>
       <div class="money">${eur(p.prezzo).replace(',00', '')}<small>${c ? 'costo ' + eur(c.tot) + ' · <span class="' + (m >= 0 ? 'pos' : 'neg') + '">' + (m >= 0 ? '+' : '') + eur(m) + '</span>' : 'prezzo'}</small></div></div>
     <div class="dots">${(p.colori || []).slice(0, 3).map(x => `<span class="dot ${hexOf(x) ? '' : 'x'}"><i style="background:${esc(hexOf(x))}"></i>${esc(x.nome)}</span>`).join('')}${(p.colori || []).length > 3 ? `<span class="dot x">+${p.colori.length - 3}</span>` : ''}</div>
+    ${(p.cp || []).slice(0, p.scorta || 0).some(x => x.length) ? `<div class="dots" style="margin-bottom:6px">${(p.cp || []).slice(0, p.scorta || 0).map((x, i) => x.length ? `<span class="dot"><b style="font-weight:700;color:#6b7280">${i + 1}</b>${x.map(c => `<i style="background:${esc(c.h || '#999')}"></i>${esc(c.n)}`).join(' ')}</span>` : '').join('')}</div>` : ''}
     <div class="meta"><div class="stp">In magazzino <button data-a="pn" data-id="${p.id}" data-d="-1">−</button><b>${p.scorta || 0}</b><button data-a="pn" data-id="${p.id}" data-d="1">+</button></div>
       <button class="chip sellb" data-a="sell" data-id="${p.id}">💰 Vendi${soldN(p.id) ? ' · ' + soldN(p.id) : ''}</button>
       ${p.file ? `<a class="lk has small" data-a="pfile" data-id="${p.id}">📎 File 3D</a>` : ''}</div></div>`;
@@ -899,6 +905,7 @@ function printSheet(p, isNew) {
     <div class="f"><label>Nome oggetto</label><input id="pn" type="text" ${OF} value="${esc(p.nome)}" placeholder="es. Snoopy"></div>
     <div class="g2"><div class="f"><label>Prezzo vendita €</label><input id="pp" type="number" min="0" step="any" inputmode="decimal" ${OF} value="${p.prezzo || ''}"></div>
     <div class="f"><label>Pezzi in magazzino</label><input id="ps" type="number" min="0" step="1" inputmode="numeric" ${OF} value="${p.scorta || 0}"></div></div>
+    <div id="pcp"></div>
     <div class="g2"><div class="f"><label>Ore stampa</label><input id="ph" type="number" min="0" step="1" inputmode="numeric" ${OF} value="${Math.floor((p.minuti || 0) / 60) || ''}"></div>
     <div class="f"><label>Minuti</label><input id="pm" type="number" min="0" max="59" step="1" inputmode="numeric" ${OF} value="${(p.minuti || 0) % 60 || ''}"></div></div>
     <div id="ppr">${prChips(pid, 'data-pp')}</div>
@@ -920,6 +927,9 @@ function printSheet(p, isNew) {
     init: el => {
       const showPh = () => { $('#pph', el).innerHTML = photo ? `<img class="photo" src="${photo}" alt=""><button class="btn sm danger" type="button" id="prm" style="margin-bottom:8px">Rimuovi foto</button>` : ''; const r = $('#prm', el); if (r) r.onclick = () => { photo = null; photoChanged = true; showPh(); }; };
       showPh();
+      const cpv = (p.cp || []).map(x => (x || []).map(c => c.n).join(' + '));
+      const drawCp = () => { const n = Math.max(0, Math.round(num($('#ps', el).value))); $('#pcp', el).innerHTML = n ? `<div class="lab" style="margin:4px 0">Colore di ogni copia in magazzino</div>` + Array.from({ length: n }, (_, i) => `<div class="f" style="margin-bottom:6px"><input class="inp cpi" type="text" ${OF} autocomplete="off" placeholder="Copia ${i + 1}: colore (es. Giallo)" value="${esc(cpv[i] || '')}"></div>`).join('') : ''; };
+      drawCp(); $('#ps', el).addEventListener('input', () => { $$('.cpi', el).forEach((x, i) => cpv[i] = x.value); drawCp(); });
       const upd = () => {
         const m = num($('#ph', el).value) * 60 + num($('#pm', el).value), r = readRows($('#crows', el));
         const c = calc(r.map(x => ({ f: fil(x.fid), g: num(x.g) })), m, { pid, extra: num($('#pex', el).value), lav: num($('#plv', el).value) });
@@ -967,6 +977,7 @@ function printSheet(p, isNew) {
         if (photo) { PHOTOS[p.id] = { fu: p.fu, data: photo }; S.meta.photoDirty[p.id] = 1; } else { delete PHOTOS[p.id]; S.meta.photoDirty[p.id] = -1; }
         jset(PH, PHOTOS);
       }
+      { const old = p.cp || []; p.cp = $$('.cpi', el).map((x, i) => { const t = x.value.trim(); if (!t) return []; const prev = old[i] || []; return t.split(/\s*[+,]\s*/).filter(Boolean).map(n => { const o = prev.find(c => c.n === n); return o || { n, h: (list('filaments').find(f => fname(f).toLowerCase() === n.toLowerCase()) || {}).hex || '' }; }); }); }
       if (!S.prints.includes(p)) S.prints.push(p);
       touch('prints', p); ensureQueue(p); render();
     },
@@ -1170,7 +1181,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v4.4</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v4.5</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
@@ -1325,9 +1336,9 @@ function stepFil(id, k, d) { const f = fil(id); f[k] = Math.max(0, (f[k] || 0) +
 function stepPrint(id, d) {
   const p = list('prints').find(x => x.id === id), prev = []; let used = 0;
   if (d > 0) for (const c of p.colori || []) { const f = fil(c.fid); if (f && num(c.g) > 0) { prev.push(JSON.stringify(f)); used += num(c.g); consume(f, num(c.g)); touch('filaments', f); } }
-  const was = p.scorta || 0; p.scorta = Math.max(0, was + d); touch('prints', p); ensureQueue(p); render();
+  const was = p.scorta || 0, cpb = JSON.stringify(p.cp || []); p.scorta = Math.max(0, was + d); p.cp = p.cp || []; if (d > 0) p.cp.push([]); else p.cp.shift(); touch('prints', p); ensureQueue(p); render();
   toast(d > 0 ? (used ? `+1 ${p.nome} · scalati ${Math.round(used)} g` : `+1 ${p.nome}`) : `−1 ${p.nome}`, () => {
-    p.scorta = was; touch('prints', p);
+    p.scorta = was; p.cp = JSON.parse(cpb); touch('prints', p);
     prev.forEach(j => { const o = JSON.parse(j), f = fil(o.id); Object.assign(f, o); touch('filaments', f); }); render();
   });
 }
