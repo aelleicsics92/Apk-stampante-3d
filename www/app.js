@@ -460,25 +460,41 @@ function viewSales() {
   ${Object.keys(byM).length > 1 ? `<div class="lab" style="margin:12px 0 4px">Per mese</div><table class="dt"><tr><th>Mese</th><th>Pezzi</th><th>Vendite</th><th>Margine</th></tr>${Object.keys(byM).sort().reverse().map(m => `<tr><td>${ml(m)}</td><td>${byM[m].n}</td><td>${eur(byM[m].r)}</td><td>${mg(byM[m].r, byM[m].c)}</td></tr>`).join('')}</table>` : ''}
   ${Object.keys(byO).length ? `<div class="lab" style="margin:12px 0 4px">Per oggetto</div><table class="dt"><tr><th>Oggetto</th><th>Pezzi</th><th>Vendite</th><th>Margine</th></tr>${Object.entries(byO).sort((a, b) => b[1].r - a[1].r).map(([n, o]) => `<tr><td>${esc(n)}</td><td>${o.n}</td><td>${eur(o.r)}</td><td>${mg(o.r, o.c)}</td></tr>`).join('')}</table>` : ''}
   <div class="lab" style="margin:12px 0 4px">Registro vendite</div>
-  <div class="list">${all.map(x => `<div class="qi"><div class="qh"><div class="qn">${esc(x.nome)}<small>${dl(x.data)} · ${x.qty || 1} × ${eur(x.prezzo)} · margine ${eur(rev(x) - cst(x))}</small></div><b>${eur(rev(x))}</b><div class="qs"><button data-a="sdel" data-id="${x.id}" aria-label="Elimina">🗑</button></div></div></div>`).join('') || '<div class="empty">Nessuna vendita nel periodo. Tocca + o "💰 Vendi" su un oggetto.</div>'}</div>`;
+  <div class="list">${all.map(x => `<div class="qi"><div class="qh"><div class="qn">${esc(x.nome)}<small>${dl(x.data)} · ${x.qty || 1} × ${eur(x.prezzo)} · margine ${eur(rev(x) - cst(x))}${x.col ? ' · ' + esc(x.col.join(', ')) : ''}</small></div><b>${eur(rev(x))}</b><div class="qs"><button data-a="sdel" data-id="${x.id}" aria-label="Elimina">🗑</button></div></div></div>`).join('') || '<div class="empty">Nessuna vendita nel periodo. Tocca + o "💰 Vendi" su un oggetto.</div>'}</div>`;
 }
 function sellSheet(p) {
   let pr = p || null;
   const body = `${p ? `<p style="margin:0 0 8px;font-weight:700">${esc(p.nome)}</p>` : `<div class="f"><label>Oggetto (cerca tra i salvati o scrivi)</label><input id="svn" type="text" ${OF} autocomplete="off" placeholder="es. Snoopy"></div>`}
     <div class="g2"><div class="f"><label>Quantità</label><input id="svq" type="number" min="1" step="1" inputmode="numeric" ${OF} value="1"></div>
     <div class="f"><label>Prezzo per pezzo €</label><input id="svp" type="number" min="0" step="any" inputmode="decimal" ${OF} value="${p ? p.prezzo || '' : ''}"></div></div>
+    <div id="svcw"></div>
     <div class="f"><label>Data</label><input id="svd" type="date" ${OF} value="${isoD(new Date())}"></div>
     <label class="row" style="font-size:.9rem;font-weight:600"><input id="svs" type="checkbox" ${p && p.scorta > 0 ? 'checked' : ''}> Scala dai pezzi in magazzino</label>`;
   openSheet('Registra vendita', body, { label: 'Salva', init: el => {
-    if (!p) { const inp = $('#svn', el); attachAC(inp, q => list('prints').filter(x => !q || x.nome.toLowerCase().includes(q.toLowerCase())).sort((a, b) => a.nome.localeCompare(b.nome)).map(x => ({ label: x.nome, p: x })), it => { inp.value = it.label; pr = it.p; $('#svp', el).value = it.p.prezzo || ''; $('#svs', el).checked = it.p.scorta > 0; $('#svq', el).focus(); }); inp.addEventListener('input', () => { pr = null; }); }
+    const drawC = () => {
+      const o = pr && list('prints').find(x => x.id === pr.id), n = o ? Math.min(o.scorta || 0, 30) : 0, w = $('#svcw', el);
+      w.innerHTML = n && $('#svs', el).checked ? `<div class="lab" style="margin:4px 0">Quale copia hai venduto?</div>` + Array.from({ length: n }, (_, i) => { const x = (o.cp || [])[i] || []; return `<label class="row" style="font-size:.92rem;padding:4px 0"><input type="checkbox" class="svc" data-i="${i}" ${i === 0 ? 'checked' : ''} style="width:20px;height:20px"> <span class="dots">${x.length ? x.map(c => `<span class="dot"><i style="background:${esc(c.h || '#999')}"></i>${esc(c.n)}</span>`).join('') : `<span class="dot x">Copia ${i + 1} (colore non indicato)</span>`}</span></label>`; }).join('') : '';
+    };
+    el.addEventListener('change', e => {
+      if (e.target.matches('.svc')) { const k = $$('.svc:checked', el).length; $('#svq', el).value = Math.max(1, k); }
+      if (e.target.id === 'svs') drawC();
+    });
+    drawC();
+    if (!p) { const inp = $('#svn', el); attachAC(inp, q => list('prints').filter(x => !q || x.nome.toLowerCase().includes(q.toLowerCase())).sort((a, b) => a.nome.localeCompare(b.nome)).map(x => ({ label: x.nome, p: x })), it => { inp.value = it.label; pr = it.p; $('#svp', el).value = it.p.prezzo || ''; $('#svs', el).checked = it.p.scorta > 0; $('#svq', el).value = 1; drawC(); $('#svq', el).focus(); }); inp.addEventListener('input', () => { pr = null; drawC(); }); }
   }, save: el => {
     const nome = p ? p.nome : $('#svn', el).value.trim(); if (!nome) { toast('Scegli l\'oggetto'); return false; }
     const q = Math.max(1, Math.round(num($('#svq', el).value) || 1)), prezzo = num($('#svp', el).value), data = $('#svd', el).value || isoD(new Date());
     if (!pr) pr = list('prints').find(x => x.nome.toLowerCase() === nome.toLowerCase()) || null;
     const o = pr && list('prints').find(x => x.id === pr.id), has = o && (printGrams(o) > 0 || o.minuti > 0);
     const rec = { id: uid(), pid: o ? o.id : '', nome, qty: q, prezzo, costo: has ? Math.round(printCalc(o).tot * 100) / 100 : 0, data };
+    if (o && $('#svs', el).checked && o.scorta > 0) {
+      const cp = o.cp = o.cp || []; while (cp.length < o.scorta) cp.push([]);
+      let idx = $$('.svc:checked', el).map(x => +x.dataset.i); for (let i = 0; idx.length < q && i < o.scorta; i++) if (!idx.includes(i)) idx.push(i);
+      idx = idx.slice(0, q).sort((a, b) => a - b);
+      const cols = idx.map(i => (cp[i] || []).map(c => c.n).join(' + ')).filter(Boolean); if (cols.length) rec.col = cols;
+      o.cp = cp.filter((_, i) => !idx.includes(i)); o.scorta = Math.max(0, o.scorta - q); touch('prints', o); ensureQueue(o);
+    }
     S.sales.push(rec); touch('sales', rec);
-    if (o && $('#svs', el).checked && o.scorta > 0) { o.scorta = Math.max(0, o.scorta - q); (o.cp = o.cp || []).splice(0, q); touch('prints', o); ensureQueue(o); }
     toast('Vendita registrata'); render();
   } });
 }
@@ -1183,7 +1199,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v4.6</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v4.7</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
