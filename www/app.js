@@ -540,6 +540,24 @@ function qApply(q, i) { // segna fatto: scala i filamenti assegnati; ritorna i g
 }
 const CPSEP = /\s+\+\s+|\s*[,;]\s*/;
 const fn0 = t => { const f = list('filaments').find(f => fname(f).toLowerCase() === t.toLowerCase()); return f ? [t] : null; };
+function cpFixAll() {
+  let any = false;
+  list('prints').forEach(p => {
+    if (!p.cp) return; let ch = false;
+    p.cp = p.cp.map(cp => {
+      let out = [];
+      for (let i = 0; i < cp.length; i++) {
+        const e = cp[i], L = (e.n || '').toLowerCase(), f = L && list('filaments').find(f => fname(f).toLowerCase().startsWith(L + '+ '));
+        if (f) { const rest = fname(f).slice(e.n.length + 2).toLowerCase(); if (cp[i + 1] && cp[i + 1].n.toLowerCase() === rest) i++; if (!out.some(o => o.n === fname(f))) out.push({ n: fname(f), h: f.hex || '' }); } else out.push(e);
+      }
+      out = out.filter((e, i, a) => a.findIndex(o => o.n === e.n) === i);
+      out = out.filter((e, i, a) => !a.some((o, j) => j !== i && o.n.length > e.n.length && o.n.toLowerCase().startsWith(e.n.toLowerCase())));
+      if (out.length !== cp.length || out.some((e, i) => e.n !== cp[i].n)) ch = true; return out;
+    });
+    if (ch) { touch('prints', p); any = true; }
+  });
+  return any;
+}
 function qCopyColors(q) {
   const seen = new Set(), out = [];
   (q.pc || []).forEach(pl => (pl || []).forEach(c => { const f = c.fid && fil(c.fid), n = f ? fname(f) : (c.skip ? '' : c.n); if (!n || seen.has(n)) return; seen.add(n); out.push({ n, h: f ? f.hex : (c.h || '') }); }));
@@ -1201,7 +1219,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v4.8</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v4.9</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
@@ -1327,6 +1345,7 @@ async function syncNow(manual) {
       try { let d = await bPhotoGet(p.id); if (d && d.d) d = d.d; if (d) { PHOTOS[p.id] = { fu: p.fu, data: d }; changed = true; } } catch { }
     }
     jset(PH, PHOTOS);
+    if (cpFixAll()) changed = true;
     // push
     const upd = {}, keys = Object.keys(S.meta.dirty);
     for (const k of keys) {
@@ -1427,6 +1446,7 @@ document.addEventListener('input', e => {
 });
 if (!S.meta.mig3) { S.meta.mig3 = 1; list('prints').forEach(ensureQueue); save(); }
 if (!S.meta.mig5) { S.meta.mig5 = 1; S.queue.filter(q => !q.d && q.id.startsWith('auto_') && !q.pl.some(Boolean)).forEach(q => { const p = list('prints').find(x => x.id === q.pid); if (p) { q.d = 1; ensureQueue(p); } }); save(); }
+cpFixAll(); save();
 if (!S.meta.mig7) { S.meta.mig7 = 1; list('prints').forEach(p => { if (!p.cp) return; let ch = 0; p.cp = p.cp.map(cp => { const out = []; for (let i = 0; i < cp.length; i++) { const e = cp[i], f = list('filaments').find(f => fname(f).toLowerCase().startsWith(e.n.toLowerCase() + '+ ')); if (f) { ch = 1; const rest = fname(f).slice(e.n.length + 2).toLowerCase(); if (cp[i + 1] && cp[i + 1].n.toLowerCase() === rest) i++; if (!out.some(o => o.n === fname(f))) out.push({ n: fname(f), h: f.hex || '' }); } else out.push(e); } return out; }); if (ch) touch('prints', p); }); save(); }
 if (!S.meta.mig6) { S.meta.mig6 = 1; S.queue.filter(q => !q.d && q.pl.length && q.pl.every(Boolean)).forEach(q => { q.d = 1; touch("queue", q); }); save(); }
 if (!S.meta.mig4) { S.meta.mig4 = 1; S.queue.filter(q => !q.d && q.id.startsWith('auto_') && !q.pl.some(Boolean)).forEach(q => { const p = list('prints').find(x => x.id === q.pid); if (p) { q.d = 1; ensureQueue(p); } }); save(); }
