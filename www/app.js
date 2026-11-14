@@ -538,6 +538,8 @@ function qApply(q, i) { // segna fatto: scala i filamenti assegnati; ritorna i g
   }
   q.pl[i] = 1; touch('queue', q); qCompleted(q); return miss;
 }
+const CPSEP = /\s+\+\s+|\s*[,;]\s*/;
+const fn0 = t => { const f = list('filaments').find(f => fname(f).toLowerCase() === t.toLowerCase()); return f ? [t] : null; };
 function qCopyColors(q) {
   const seen = new Set(), out = [];
   (q.pc || []).forEach(pl => (pl || []).forEach(c => { const f = c.fid && fil(c.fid), n = f ? fname(f) : (c.skip ? '' : c.n); if (!n || seen.has(n)) return; seen.add(n); out.push({ n, h: f ? f.hex : (c.h || '') }); }));
@@ -945,7 +947,7 @@ function printSheet(p, isNew) {
       showPh();
       const cpv = (p.cp || []).map(x => (x || []).map(c => c.n).join(' + '));
       let drawCp = () => { const n = Math.max(0, Math.round(num($('#ps', el).value))); $('#pcp', el).innerHTML = n ? `<div class="lab" style="margin:4px 0">Colore di ogni copia in magazzino</div>` + Array.from({ length: n }, (_, i) => `<div class="f" style="margin-bottom:6px"><input class="inp cpi" type="text" ${OF} autocomplete="off" placeholder="Copia ${i + 1}: colore (es. Giallo)" value="${esc(cpv[i] || '')}"></div>`).join('') : ''; };
-      const acCp = () => $$('.cpi', el).forEach(inp => attachAC(inp, q => { const seg = q.split(/\s*[+,]\s*/).pop().toLowerCase(); return list('filaments').filter(f => !seg || fname(f).toLowerCase().includes(seg)).sort((a, b) => (tot(b) > 0) - (tot(a) > 0) || fname(a).localeCompare(fname(b))).slice(0, 12).map(f => ({ label: fname(f), sub: tot(f) + ' bob.' })); }, it => { const parts = inp.value.split(/(\s*[+,]\s*)/); parts[parts.length - 1] = it.label; inp.value = parts.join(''); }));
+      const acCp = () => $$('.cpi', el).forEach(inp => attachAC(inp, q => { const seg = q.split(CPSEP).pop().toLowerCase(); return list('filaments').filter(f => !seg || fname(f).toLowerCase().includes(seg)).sort((a, b) => (tot(b) > 0) - (tot(a) > 0) || fname(a).localeCompare(fname(b))).slice(0, 12).map(f => ({ label: fname(f), sub: tot(f) + ' bob.' })); }, it => { const parts = inp.value.split(/(\s+\+\s+|\s*[,;]\s*)/); parts[parts.length - 1] = it.label; inp.value = parts.join(''); }));
       const drawCp0 = drawCp; drawCp = () => { drawCp0(); acCp(); };
       drawCp(); $('#ps', el).addEventListener('input', () => { $$('.cpi', el).forEach((x, i) => cpv[i] = x.value); drawCp(); });
       const upd = () => {
@@ -995,7 +997,7 @@ function printSheet(p, isNew) {
         if (photo) { PHOTOS[p.id] = { fu: p.fu, data: photo }; S.meta.photoDirty[p.id] = 1; } else { delete PHOTOS[p.id]; S.meta.photoDirty[p.id] = -1; }
         jset(PH, PHOTOS);
       }
-      { const old = p.cp || []; p.cp = $$('.cpi', el).map((x, i) => { const t = x.value.trim(); if (!t) return []; const prev = old[i] || []; return t.split(/\s*[+,]\s*/).filter(Boolean).map(n => { const o = prev.find(c => c.n === n); if (o) return o; const L = n.toLowerCase(), fs = list('filaments'), f = fs.find(f => fname(f).toLowerCase() === L) || (fs.filter(f => (f.color || '').toLowerCase() === L).length === 1 ? fs.find(f => (f.color || '').toLowerCase() === L) : null); return f ? { n: fname(f), h: f.hex || '' } : { n, h: '' }; }); }); }
+      { const old = p.cp || []; p.cp = $$('.cpi', el).map((x, i) => { const t = x.value.trim(); if (!t) return []; const prev = old[i] || []; return (fn0(t) || t.split(CPSEP)).filter(Boolean).map(n => { const o = prev.find(c => c.n === n); if (o) return o; const L = n.toLowerCase(), fs = list('filaments'), f = fs.find(f => fname(f).toLowerCase() === L) || (fs.filter(f => (f.color || '').toLowerCase() === L).length === 1 ? fs.find(f => (f.color || '').toLowerCase() === L) : null); return f ? { n: fname(f), h: f.hex || '' } : { n, h: '' }; }); }); }
       if (!S.prints.includes(p)) S.prints.push(p);
       touch('prints', p); ensureQueue(p); render();
     },
@@ -1199,7 +1201,7 @@ function viewSet() {
       <pre class="code">${esc(SB_SQL)}</pre><button class="btn sm" data-a="copysql">Copia script Supabase</button></details></div>
   <div class="panel"><h3>Dati</h3><div class="row"><button class="btn sm" data-a="csvf">CSV bobine</button><button class="btn sm" data-a="csvp">CSV stampe</button><button class="btn sm" data-a="export">Backup completo</button><button class="btn sm" data-a="import">Ripristina backup</button></div>
     <div class="row" style="margin-top:8px"><button class="btn sm danger" data-a="wipe">Svuota archivio locale</button></div>
-    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v4.7</p></div>`;
+    <input type="file" id="impf" accept=".json,application/json" hidden><p class="hint">Spoolio · v4.8</p></div>`;
 }
 function savePrinters() {
   S.settings.printers = $$('#prl .prow').map(r => ({ id: r.dataset.id, nome: $('.pn', r).value.trim() || 'Stampante', watt: num($('.pw', r).value), usuraOra: num($('.pu', r).value) }));
@@ -1425,6 +1427,7 @@ document.addEventListener('input', e => {
 });
 if (!S.meta.mig3) { S.meta.mig3 = 1; list('prints').forEach(ensureQueue); save(); }
 if (!S.meta.mig5) { S.meta.mig5 = 1; S.queue.filter(q => !q.d && q.id.startsWith('auto_') && !q.pl.some(Boolean)).forEach(q => { const p = list('prints').find(x => x.id === q.pid); if (p) { q.d = 1; ensureQueue(p); } }); save(); }
+if (!S.meta.mig7) { S.meta.mig7 = 1; list('prints').forEach(p => { if (!p.cp) return; let ch = 0; p.cp = p.cp.map(cp => { const out = []; for (let i = 0; i < cp.length; i++) { const e = cp[i], f = list('filaments').find(f => fname(f).toLowerCase().startsWith(e.n.toLowerCase() + '+ ')); if (f) { ch = 1; const rest = fname(f).slice(e.n.length + 2).toLowerCase(); if (cp[i + 1] && cp[i + 1].n.toLowerCase() === rest) i++; if (!out.some(o => o.n === fname(f))) out.push({ n: fname(f), h: f.hex || '' }); } else out.push(e); } return out; }); if (ch) touch('prints', p); }); save(); }
 if (!S.meta.mig6) { S.meta.mig6 = 1; S.queue.filter(q => !q.d && q.pl.length && q.pl.every(Boolean)).forEach(q => { q.d = 1; touch("queue", q); }); save(); }
 if (!S.meta.mig4) { S.meta.mig4 = 1; S.queue.filter(q => !q.d && q.id.startsWith('auto_') && !q.pl.some(Boolean)).forEach(q => { const p = list('prints').find(x => x.id === q.pid); if (p) { q.d = 1; ensureQueue(p); } }); save(); }
 render();
